@@ -24,29 +24,47 @@ const service = module.exports = {};
 function generateCodeVerifier() { return crypto.randomBytes(32).toString('base64url'); }
 function generateCodeChallenge(verifier) { return crypto.createHash('sha256').update(verifier).digest('base64url'); }
 
-const pkceStateStore = new Map();
+const pkceStateStore = new Map(); // Kept for backwards compatibility just in case
 
-service.getAuthorizationUrl = () => {
+service.getAuthorizationParams = () => {
     const codeVerifier = generateCodeVerifier();
     const codeChallenge = generateCodeChallenge(codeVerifier);
     const state = crypto.randomBytes(16).toString('hex');
-    pkceStateStore.set(state, codeVerifier);
-    setTimeout(() => pkceStateStore.delete(state), 10 * 60 * 1000);
-    return authenticationClient.authorize(
+
+    const url = authenticationClient.authorize(
         APS_CLIENT_ID,
         ResponseType.Code,
         APS_CALLBACK_URL,
         INTERNAL_TOKEN_SCOPES,
         { codeChallenge, codeChallengeMethod: 'S256', state }
     );
+
+    return { url, codeVerifier, state };
+};
+
+service.getAuthorizationUrl = () => {
+    const data = service.getAuthorizationParams();
+    pkceStateStore.set(data.state, data.codeVerifier);
+    setTimeout(() => pkceStateStore.delete(data.state), 10 * 60 * 1000);
+    return data.url;
 };
 
 service.authCallbackMiddleware = async (req, res, next) => {
     try {
         const { code, state } = req.query;
-        if (!state || !pkceStateStore.has(state)) return res.status(400).json({ error: 'Invalid or expired OAuth state.' });
-        const codeVerifier = pkceStateStore.get(state);
-        pkceStateStore.delete(state);
+
+        // Retrieve PKCE verifier from robust session cookie OR fallback to memory map
+        let codeVerifier = null;
+        if (state && req.session && req.session.oauth_state === state) {
+            codeVerifier = req.session.oauth_verifier;
+        } else if (state && pkceStateStore.has(state)) {
+            codeVerifier = pkceStateStore.get(state);
+            pkceStateStore.delete(state);
+        }
+
+        if (!codeVerifier) {
+            return res.status(400).json({ error: 'Invalid or expired OAuth state.' });
+        }
 
         const internalCredentials = await authenticationClient.getThreeLeggedToken(
             APS_CLIENT_ID, code, APS_CALLBACK_URL,

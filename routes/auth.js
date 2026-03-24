@@ -2,6 +2,7 @@
 
 const express = require('express');
 const {
+    getAuthorizationParams,
     getAuthorizationUrl,
     authCallbackMiddleware,
     authRefreshMiddleware,
@@ -11,10 +12,12 @@ const {
 let router = express.Router();
 
 // ── GET /api/auth/login ───────────────────────────────────────────────────────
-// getAuthorizationUrl() now internally generates PKCE and state,
-// storing codeVerifier in server-side memory (not cookie) — works in all browsers
+// Uses session-based PKCE to survive server restarts and browser pre-fetches
 router.get('/api/auth/login', function (req, res) {
-    res.redirect(getAuthorizationUrl());
+    const authData = getAuthorizationParams();
+    req.session.oauth_state = authData.state;
+    req.session.oauth_verifier = authData.codeVerifier;
+    res.redirect(authData.url);
 });
 
 // ── GET /api/auth/logout ──────────────────────────────────────────────────────
