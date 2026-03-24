@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>APS AI Platform | Autodesk Platform Services</title>
+    <meta name="description" content="APS 기반 AI 플랫폼 - BIM 모델 뷰어와 AI 분석을 통합한 스마트 플랫폼" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+
+    <!-- Autodesk Forge Viewer -->
+    <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.css" />
+    <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.js"></script>
+
+    <!-- InspireTree (for Hubs/Projects/Folders sidebar tree) -->
+    <link rel="stylesheet" href="https://unpkg.com/inspire-tree-dom@4.0.6/dist/inspire-tree-light.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+    <script src="https://unpkg.com/inspire-tree@4.3.1/dist/inspire-tree.js"></script>
+    <script src="https://unpkg.com/inspire-tree-dom@4.0.6/dist/inspire-tree-dom.min.js"></script>
+
+    <!-- Export Libraries -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="/css/style.css" />
+
+    <!-- Three Mesh BVH for Narrow Phase Clash -->
+    <script src="https://unpkg.com/three-mesh-bvh@0.7.3/build/index.umd.cjs"></script>
+</head>
+
+<body>
+    <!-- ── Header ─────────────────────────────────────────────────────────── -->
+    <header class="header">
+        <div class="header-left">
+            <div class="logo">
+                <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+                    <rect width="32" height="32" rx="8" fill="url(#grad1)" />
+                    <path d="M8 24L16 8L24 24H8Z" fill="white" opacity="0.9" />
+                    <path d="M12 24L16 16L20 24H12Z" fill="white" />
+                    <defs>
+                        <linearGradient id="grad1" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                            <stop offset="0%" stop-color="#6366f1" />
+                            <stop offset="100%" stop-color="#0ea5e9" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <span class="logo-text">APS <span class="logo-accent">AI</span> Platform</span>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="status-badge" id="status-badge">
+                <span class="status-dot connected"></span>
+                <span id="status-text">APS Connected</span>
+            </div>
+            <!-- login button — initially hidden, shown by main.js -->
+            <button class="btn-auth" id="login" style="visibility:hidden;">Login</button>
+        </div>
+    </header>
+
+    <!-- ── Main Layout ────────────────────────────────────────────────────── -->
+    <main class="main-layout">
+
+        <!-- Left Sidebar: InspireTree Hub Browser ──────────────────────── -->
+        <aside class="sidebar-left" id="sidebar-left">
+            <div class="sidebar-header">
+                <h2 class="sidebar-title">Model Browser</h2>
+                <button class="icon-btn" id="refresh-btn" title="Refresh" onclick="location.reload()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="23 4 23 10 17 10"></polyline>
+                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- InspireTree mounts here -->
+            <div class="tree-container" id="tree-container">
+                <div id="tree"></div>
+            </div>
+
+            <!-- URN loader -->
+            <div class="urn-loader">
+                <label class="urn-label">Load by URN</label>
+                <div class="urn-input-row">
+                    <input type="text" id="urn-input" placeholder="Enter model URN..." class="urn-input" />
+                    <button class="btn-load" id="load-urn-btn">Load</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Resize Handle between sidebar and viewer -->
+        <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
+
+        <!-- Center: Viewer ──────────────────────────────────────────────── -->
+        <section class="viewer-container" id="viewer-container">
+            <!-- Normal Single Viewer -->
+            <div id="preview"></div>
+
+            <!-- Split Viewer (Hidden by default) -->
+            <div id="split-viewer" class="split-viewer" style="display:none;">
+                <div class="split-view-container">
+                    <div class="split-label">Version A (Old)</div>
+                    <div id="preview-a" class="preview-split"></div>
+                </div>
+                <div class="split-view-container">
+                    <div class="split-label">Version B (New)</div>
+                    <div id="preview-b" class="preview-split"></div>
+                </div>
+            </div>
+
+            <!-- Version Comparison Selection Bar (Hidden by default) -->
+            <div id="compare-bar" class="compare-bar" style="display:none;">
+                <div class="compare-versions">
+                    <div class="version-slot" id="slot-a">
+                        <span class="slot-label">Version A:</span>
+                        <span class="slot-value" id="slot-a-name">Select from tree...</span>
+                    </div>
+                    <div class="compare-divider">vs</div>
+                    <div class="version-slot" id="slot-b">
+                        <span class="slot-label">Version B:</span>
+                        <span class="slot-value" id="slot-b-name">Select from tree...</span>
+                    </div>
+                </div>
+                <div class="compare-actions">
+                    <button class="btn-diff-run" id="run-diff-btn" disabled>Run Comparison</button>
+                    <button class="btn-diff-exit" id="exit-compare-btn">Exit Compare</button>
+                </div>
+            </div>
+
+            <!-- Export Toolbar -->
+            <div id="diff-export-toolbar" class="diff-export-toolbar" style="display:none;">
+                <span class="export-label">📊 비교 결과 내보내기:</span>
+                <!-- Excel Dropdown -->
+                <div class="excel-dropdown-wrap" id="excel-dropdown-wrap">
+                    <button class="btn-export btn-excel-icon" id="btn-export-excel"
+                        onclick="window.toggleExcelDropdown(event)" aria-haspopup="true" aria-expanded="false">
+                        <svg class="excel-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="8" y1="13" x2="16" y2="13" />
+                            <line x1="8" y1="17" x2="16" y2="17" />
+                            <polyline points="10 9 9 9 8 9" />
+                        </svg>
+                        Excel ▾
+                    </button>
+                    <ul class="excel-dropdown-menu" id="excel-dropdown-menu" role="menu">
+                        <li role="menuitem" onclick="window.exportDiffExcel(); window.closeExcelDropdown()">
+                            <span class="menu-icon">📊</span>
+                            <span>
+                                <strong>전체 데이터 내려받기</strong>
+                                <small>모든 Added / Removed / Changed 항목</small>
+                            </span>
+                        </li>
+                        <li role="menuitem" onclick="window.exportFilteredDiffExcel(); window.closeExcelDropdown()">
+                            <span class="menu-icon">🔍</span>
+                            <span>
+                                <strong>필터 적용 데이터 내려받기</strong>
+                                <small>현재 화면에 보이는 항목만</small>
+                            </span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- PDF Dropdown -->
+                <div class="pdf-dropdown-wrap" id="pdf-dropdown-wrap">
+                    <button class="btn-export btn-pdf-icon" id="btn-export-pdf"
+                        onclick="window.togglePdfDropdown(event)" aria-haspopup="true" aria-expanded="false">
+                        <svg class="pdf-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                            stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="16" y1="13" x2="8" y2="13" />
+                            <line x1="16" y1="17" x2="8" y2="17" />
+                            <polyline points="10 9 9 9 8 9" />
+                        </svg>
+                        PDF ▾
+                    </button>
+                    <ul class="pdf-dropdown-menu" id="pdf-dropdown-menu" role="menu">
+                        <li role="menuitem" onclick="window.exportDiffPdf(); window.closePdfDropdown()">
+                            <span class="menu-icon">📄</span>
+                            <span>
+                                <strong>전체 데이터 내려받기</strong>
+                                <small>모든 Added / Removed / Changed 항목</small>
+                            </span>
+                        </li>
+                        <li role="menuitem" onclick="window.exportFilteredDiffPdf(); window.closePdfDropdown()">
+                            <span class="menu-icon">🔍</span>
+                            <span>
+                                <strong>필터 적용 데이터 내려받기</strong>
+                                <small>현재 화면에 보이는 항목만</small>
+                            </span>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Category Filter Toolbar -->
+            <div id="diff-filter-toolbar" class="diff-filter-toolbar" style="display:none;">
+                <span class="filter-label">🔍 카테고리 필터:</span>
+                <select id="filter-all-categories" class="category-select"
+                    onchange="window.applyDiffFilter('all', this.value)">
+                    <option value="">전체 보기 (All)</option>
+                </select>
+                <span class="filter-hint">또는 각 열에서 개별 선택 →</span>
+            </div>
+
+            <!-- New Three-Column Diff Results (To match image) -->
+            <div id="diff-results-three-columns" class="diff-results-columns" style="display:none;">
+                <!-- Added Items Column -->
+                <div class="diff-col added-col">
+                    <div class="diff-col-header">
+                        <div class="toggle-row">
+                            <label class="switch">
+                                <input type="checkbox" checked id="toggle-added">
+                                <span class="slider round"></span>
+                            </label>
+                            <span class="toggle-label">All Added</span>
+                        </div>
+                        <div class="col-title-bar added-bar">
+                            Added Items <span id="count-added-v2">(0)</span>
+                        </div>
+                        <select class="category-select category-select-col" id="filter-added-categories"
+                            onchange="window.applyDiffFilter('added', this.value)">
+                            <option value="">카테고리 전체</option>
+                        </select>
+                    </div>
+                    <div class="diff-col-body">
+                        <table class="diff-table-v2">
+                            <thead>
+                                <tr>
+                                    <th>name</th>
+                                    <th>category</th>
+                                    <th>level</th>
+                                </tr>
+                            </thead>
+                            <tbody id="list-added"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Removed Items Column -->
+                <div class="diff-col removed-col">
+                    <div class="diff-col-header">
+                        <div class="toggle-row">
+                            <label class="switch">
+                                <input type="checkbox" checked id="toggle-removed">
+                                <span class="slider round"></span>
+                            </label>
+                            <span class="toggle-label">All Removed</span>
+                        </div>
+                        <div class="col-title-bar removed-bar">
+                            Removed Items <span id="count-removed-v2">(0)</span>
+                        </div>
+                        <select class="category-select category-select-col" id="filter-removed-categories"
+                            onchange="window.applyDiffFilter('removed', this.value)">
+                            <option value="">카테고리 전체</option>
+                        </select>
+                    </div>
+                    <div class="diff-col-body">
+                        <table class="diff-table-v2">
+                            <thead>
+                                <tr>
+                                    <th>name</th>
+                                    <th>category</th>
+                                    <th>level</th>
+                                </tr>
+                            </thead>
+                            <tbody id="list-removed"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Changed Items Column -->
+                <div class="diff-col changed-col">
+                    <div class="diff-col-header">
+                        <div class="toggle-row">
+                            <label class="switch">
+                                <input type="checkbox" checked id="toggle-changed">
+                                <span class="slider round"></span>
+                            </label>
+                            <span class="toggle-label">All Changed</span>
+                        </div>
+                        <div class="col-title-bar changed-bar">
+                            Changed Items <span id="count-changed-v2">(0)</span>
+                        </div>
+                        <select class="category-select category-select-col" id="filter-changed-categories"
+                            onchange="window.applyDiffFilter('changed', this.value)">
+                            <option value="">카테고리 전체</option>
+                        </select>
+                    </div>
+                    <div class="diff-col-body">
+                        <table class="diff-table-v2">
+                            <thead>
+                                <tr>
+                                    <th>name</th>
+                                    <th>geom?</th>
+                                    <th>prop?</th>
+                                </tr>
+                            </thead>
+                            <tbody id="list-changed"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Clash Results Panel (Hidden by default) -->
+            <div id="clash-results-panel" class="clash-results-panel" style="display:none;">
+                <div class="clash-results-header">
+                    <div class="header-main-title">
+                        <span class="header-icon"><i class="fas fa-bolt"></i></span>
+                        <h3>Clash Detection (Broad Phase)</h3>
+                    </div>
+                    <div id="clash-local-config" class="clash-local-config">
+                        <div class="clash-config-grid">
+                            <!-- Model A Selection -->
+                            <div class="clash-select-group">
+                                <label><i class="fas fa-cube"></i> Model A</label>
+                                <select id="clash-model-a" class="clash-select">
+                                    <option value="0">Select Model A...</option>
+                                </select>
+                            </div>
+                            <div class="clash-select-group">
+                                <label><i class="fas fa-tags"></i> Category A</label>
+                                <select id="clash-category-a" class="clash-select">
+                                    <option value="">Select Category...</option>
+                                </select>
+                            </div>
+
+                            <!-- Model B Selection -->
+                            <div class="clash-select-group">
+                                <label><i class="fas fa-cube"></i> Model B</label>
+                                <select id="clash-model-b" class="clash-select">
+                                    <option value="0">Select Model B...</option>
+                                </select>
+                            </div>
+                            <div class="clash-select-group">
+                                <label><i class="fas fa-tags"></i> Category B</label>
+                                <select id="clash-category-b" class="clash-select">
+                                    <option value="">Select Category...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="clash-action-row">
+                            <button id="run-local-clash-btn" class="run-clash-btn">Run Broad-Phase Check</button>
+                            <button id="end-clash-session-btn" class="end-session-btn" style="display:none;">검사
+                                종료</button>
+                        </div>
+                    </div>
+                    <button class="close-panel-btn" id="close-clash-panel">✕</button>
+                </div>
+                <div class="clash-results-body">
+                    <table class="clash-table">
+                        <thead>
+                            <tr>
+                                <th>Item 1</th>
+                                <th>Item 2</th>
+                                <th>Distance</th>
+                            </tr>
+                            </tr>
+                        </thead>
+                        <tbody id="clash-results-list">
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Viewer bottom bar -->
+            <div class="viewer-info-bar" id="viewer-info-bar" style="display:none;">
+                <span id="model-name-label">Model Loaded</span>
+                <div class="viewer-actions">
+                    <button class="tool-btn" id="screenshot-btn" title="Screenshot">📷 Screenshot</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Sidebar: Project Issues (Moved out of AI Panel) ───────────── -->
+        <aside class="sidebar-right" id="sidebar-right">
+            <div class="issue-panel-section">
+                <div class="issue-panel-header">
+                    <h2 class="issue-list-title">Project Issues</h2>
+                    <span class="issue-count-badge" id="issue-count">0</span>
+                </div>
+                <div class="issue-list-container" id="issue-list-body">
+                    <!-- Populated by issue-manager.js -->
+                    <p class="issue-empty">No issues found. Click the Pin icon to add one.</p>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    </div>
+    </main>
+
+    <!-- ── Toast Notification ─────────────────────────────────────────────── -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- ── Scripts ────────────────────────────────────────────────────────── -->
+    <!-- ai-panel uses non-module approach, load first -->
+    <script src="/js/ai-panel.js?v=1.1"></script>
+    <!-- main.js wires viewer + tree as ES6 module -->
+    <script src="/js/main.js?v=1.1" type="module"></script>
+
+    <!-- URN input handler (non-module, can reference window globals) -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // ── URN direct load ─────────────────────────────────────────
+            document.getElementById('load-urn-btn')?.addEventListener('click', () => {
+                const urn = document.getElementById('urn-input').value.trim();
+                if (urn && window._viewer) {
+                    import('/js/viewer.js').then(({ loadModel }) => loadModel(window._viewer, urn));
+                }
+            });
+
+            // ── Sidebar resize handle ───────────────────────────────────
+            const handle = document.getElementById('sidebar-resize-handle');
+            const sidebarLeft = document.getElementById('sidebar-left');
+            const MIN_W = 180;
+            const MAX_W = 520;
+            let dragging = false;
+            let startX, startW;
+
+            handle.addEventListener('mousedown', (e) => {
+                dragging = true;
+                startX = e.clientX;
+                startW = sidebarLeft.getBoundingClientRect().width;
+                handle.classList.add('dragging');
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!dragging) return;
+                const delta = e.clientX - startX;
+                const newW = Math.min(MAX_W, Math.max(MIN_W, startW + delta));
+                sidebarLeft.style.width = newW + 'px';
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (!dragging) return;
+                dragging = false;
+                handle.classList.remove('dragging');
+                document.body.style.cursor = '';
+                document.body.style.userSelect = '';
+            });
+
+            // Note: Right Panel Resize/Collapse and Table Resizing are now handled in diff-viewer.js (ResizingEngine)
+        });
+    </script>
+    <!-- ── Floating AI Assistant Widget ──────────────────────────────────────── -->
+    <button class="ai-widget-toggle" id="ai-assistant-button" title="Open AI Assistant" onclick="toggleAiAssistant()">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path
+                d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z">
+            </path>
+        </svg>
+    </button>
+
+    <!-- ── AI Assistant Overlay (Ultra Priority - Body End) ────────────── -->
+    <div class="ai-floating-widget" id="ai-assistant-container" style="display: none;">
+        <div class="ai-panel">
+            <div class="ai-panel-header">
+                <div class="ai-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                        <path
+                            d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v2a3 3 0 0 1-3 3h-1v1a4 4 0 0 1-8 0v-1H7a3 3 0 0 1-3-3v-2a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"
+                            fill="url(#aiGrad)" />
+                        <defs>
+                            <linearGradient id="aiGrad" x1="0" y1="0" x2="24" y2="24">
+                                <stop offset="0%" stop-color="#a78bfa" />
+                                <stop offset="100%" stop-color="#38bdf8" />
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <div>
+                    <h2 class="ai-title">AI Assistant</h2>
+                    <span class="ai-provider-badge" id="ai-provider-badge">Gemini</span>
+                </div>
+                <button class="close-ai-widget" id="ai-assistant-close">✕</button>
+            </div>
+
+            <div class="context-panel" id="context-panel">
+                <div class="context-header">
+                    <span class="context-label">Model Context</span>
+                    <button class="clear-btn" id="clear-context-btn">Clear</button>
+                </div>
+                <div class="context-body" id="context-body">
+                    <p class="context-empty">No model loaded. Select elements in the viewer to add context.</p>
+                </div>
+            </div>
+
+            <div class="chat-messages" id="chat-messages">
+                <div class="chat-welcome">
+                    <div class="welcome-icon">✨</div>
+                    <p>Hello! I'm your AEC AI assistant.<br />Load a BIM model and ask me anything about it.</p>
+                </div>
+            </div>
+
+            <div class="suggestions" id="suggestions">
+                <button class="suggestion-chip" data-q="Summarize the loaded model for me">📋 Summarize model</button>
+                <button class="suggestion-chip" data-q="What types of elements are in this model?">🏗️ Element
+                    types</button>
+                <button class="suggestion-chip" data-q="List all materials used">🎨 Materials</button>
+                <button class="suggestion-chip" data-q="Identify any potential issues">⚠️ Find issues</button>
+            </div>
+
+            <div class="chat-input-area">
+                <div class="chat-input-wrapper">
+                    <textarea id="chat-input" class="chat-input" placeholder="Ask about the BIM model..."
+                        rows="1"></textarea>
+                    <button class="send-btn" id="send-btn" disabled>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2.5">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                    </button>
+                </div>
+                <p class="chat-hint">Press Enter to send · Shift+Enter for new line</p>
+            </div>
+        </div>
+    </div>
+    <script>
+        window.toggleAiAssistant = function () {
+            console.log("최종 확인: AI 버튼 클릭됨");
+            const container = document.getElementById('ai-assistant-container');
+            if (container) {
+                const currentDisplay = window.getComputedStyle(container).display;
+                if (currentDisplay === 'none') {
+                    container.style.setProperty('display', 'block', 'important');
+                    container.style.setProperty('position', 'fixed', 'important');
+                    container.style.setProperty('z-index', '100000', 'important');
+                    container.style.setProperty('opacity', '1', 'important');
+                    container.style.setProperty('transform', 'translateY(0) scale(1)', 'important');
+
+                    // Focus input
+                    const chatInput = document.getElementById('chat-input');
+                    if (chatInput) setTimeout(() => chatInput.focus(), 100);
+                } else {
+                    container.style.setProperty('display', 'none', 'important');
+                    container.style.setProperty('opacity', '0', 'important');
+                    container.style.setProperty('transform', 'translateY(40px) scale(0.92)', 'important');
+                }
+            } else {
+                console.error("오류: #ai-assistant-container 요소를 찾을 수 없음");
+            }
+        };
+
+        // X 버튼 클릭 시 창 닫기 로직 추가
+        document.addEventListener('DOMContentLoaded', function () {
+            const closeBtn = document.getElementById('ai-assistant-close');
+            if (closeBtn) {
+                closeBtn.onclick = function () {
+                    const container = document.getElementById('ai-assistant-container');
+                    if (container) {
+                        container.style.setProperty('display', 'none', 'important');
+                    }
+                };
+            }
+        });
+    </script>
+</body>
+
+</html>
