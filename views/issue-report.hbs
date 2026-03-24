@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 15mm;
+        }
+
+        body {
+            font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+            color: #333;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* ─── Page break per issue ──────────────────────── */
+        .issue-report-page {
+            page-break-after: always;
+        }
+
+        .issue-report-page:last-child {
+            page-break-after: avoid;
+        }
+
+        /* ─── Header ──────────────────────────────────── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .header-logo {
+            max-width: 150px;
+            max-height: 50px;
+            object-fit: contain;
+        }
+
+        .header-title {
+            flex: 1;
+            text-align: center;
+            font-size: 22px;
+            font-weight: 800;
+        }
+
+        .header-empty {
+            width: 150px;
+        }
+
+        /* ─── Table ───────────────────────────────────── */
+        .issue-report-table {
+            table-layout: fixed !important;
+            /* Force cell widths to be respected */
+            width: 100% !important;
+            border-collapse: collapse;
+            word-wrap: break-word;
+            /* Ensure text doesn't push the table width */
+        }
+
+        th,
+        td {
+            border: 1px solid #777;
+            padding: 10px 12px;
+            text-align: center;
+            font-size: 14px;
+            word-wrap: break-word;
+            overflow: hidden;
+        }
+
+        th {
+            background-color: #d1d5db;
+            font-weight: bold;
+        }
+
+        .label-cell {
+            background-color: #d1d5db;
+            font-weight: bold;
+        }
+
+        .data-cell {
+            background-color: #fff;
+            text-align: center;
+        }
+
+        .col-no {
+            width: 10%;
+        }
+
+        .col-no-val {
+            width: 15%;
+        }
+
+        .col-struct {
+            width: 25%;
+        }
+
+        .col-struct-val {
+            width: 25%;
+        }
+
+        .col-work {
+            width: 10%;
+        }
+
+        .col-work-val {
+            width: 15%;
+        }
+
+        .desc-cell {
+            text-align: left;
+            vertical-align: top;
+            min-height: 36px;
+        }
+
+        /* ─── CLOSED: 50:50 ratio comparison ──────────── */
+        .image-half-cell {
+            width: 50% !important;
+            min-width: 50% !important;
+            max-width: 50% !important;
+            height: 380px !important;
+            text-align: center;
+            vertical-align: middle;
+            padding: 8px !important;
+            box-sizing: border-box !important;
+        }
+
+        .image-half-cell img {
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
+            object-fit: contain;
+            display: block;
+            margin: 0 auto;
+        }
+
+        /* ─── OPEN: Full width centered ───────────────── */
+        .image-full-cell {
+            width: 100% !important;
+            height: 420px !important;
+            text-align: center;
+            vertical-align: middle;
+            padding: 10px !important;
+            box-sizing: border-box !important;
+        }
+
+        .centered-image {
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
+            object-fit: contain;
+            display: block;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+
+<body>
+
+    {{#each issues}}
+    <div class="issue-report-page">
+
+        <div class="header">
+            {{#if ../logoBase64}}
+            <img src="{{../logoBase64}}" class="header-logo" alt="Logo" />
+            {{else}}
+            <div class="header-empty"></div>
+            {{/if}}
+            <div class="header-title">{{../title}}</div>
+            <div class="header-empty"></div>
+        </div>
+
+        <table class="issue-report-table">
+            <tbody>
+                <!-- Metadata Row -->
+                <tr>
+                    <th class="col-no">NO.</th>
+                    <td class="col-no-val">{{issueId}}</td>
+                    <th class="col-struct label-cell">구조물</th>
+                    <td class="col-struct-val data-cell">{{#if pdf_structure}}{{pdf_structure}}{{else}}[MISSING]{{/if}}
+                    </td>
+                    <th class="col-work label-cell">공종</th>
+                    <td class="col-work-val data-cell">{{#if pdf_work_type}}{{pdf_work_type}}{{else}}[MISSING]{{/if}}
+                    </td>
+                </tr>
+                <!-- Description Rows -->
+                <tr>
+                    <td class="label-cell">간섭 내용</td>
+                    <td colspan="5" class="desc-cell">{{description}}</td>
+                </tr>
+                <tr>
+                    <td class="label-cell">수정사항</td>
+                    <td colspan="5" class="desc-cell">{{resolution_description}}</td>
+                </tr>
+
+                {{#if (eq status "Closed")}}
+                {{!-- == CLOSED Status: 50/50 Before vs After == --}}
+                <tr>
+                    <th colspan="3" style="width: 50% !important;">변경 전</th>
+                    <th colspan="3" style="width: 50% !important;">변경 후</th>
+                </tr>
+                <tr>
+                    <td colspan="3" class="image-half-cell">
+                        {{#if thumbnail}}
+                        <img src="{{thumbnail}}" alt="Before" />
+                        {{/if}}
+                    </td>
+                    <td colspan="3" class="image-half-cell">
+                        {{#if after_snapshot_url}}
+                        <img src="{{after_snapshot_url}}" alt="After" />
+                        {{/if}}
+                    </td>
+                </tr>
+
+                {{else}}
+                {{!-- == OPEN Status: Single full-width image == --}}
+                <tr>
+                    <th colspan="6">이 미 지</th>
+                </tr>
+                <tr>
+                    <td colspan="6" class="image-full-cell">
+                        {{#if thumbnail}}
+                        <img src="{{thumbnail}}" class="centered-image" alt="Open Issue" />
+                        {{/if}}
+                    </td>
+                </tr>
+                {{/if}}
+
+            </tbody>
+        </table>
+
+    </div>
+    {{/each}}
+
+</body>
+
+</html>
