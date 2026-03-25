@@ -4525,5 +4525,38 @@ input:checked+.slider:before {
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.8rem;
 }
+
+/* Header Map Button */
+.header-map-btn {
+    padding: 6px 14px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border-primary);
+    border-radius: 18px;
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all var(--duration) var(--ease-out);
+}
+
+.header-map-btn:hover {
+    background: rgba(99, 102, 241, 0.15);
+    border-color: var(--accent-purple);
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.2);
+}
+
+.header-map-btn.active {
+    background: var(--gradient-brand);
+    color: #fff;
+    border: none;
+    box-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
+}
+
 /* Force crosshair during issue creation */
-.issue-creation-active, .issue-creation-active * { cursor: crosshair !important; }
+.issue-creation-active,
+.issue-creation-active * {
+    cursor: crosshair !important;
+}

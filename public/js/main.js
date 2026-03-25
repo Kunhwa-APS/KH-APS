@@ -7,6 +7,7 @@ import { runDiff, visualizeDiff, loadVersions, exitCompareMode, showDiffList, ad
 // import { initLocalClash, closeClashPanel } from './clash-viewer.js';
 import { IssueManager } from './issue-manager.js';
 import { addCustomButtons } from './toolbar-utils.js';
+import { initMap, addProjectMarkers, flyToLocation, resizeMap } from './map.js';
 
 import { explorer } from './explorer.js';
 
@@ -22,6 +23,8 @@ let versionA = null;
 let versionB = null;
 let _exitCompareToolbarBtn = null; // Reference to the toolbar exit button
 let issueManager = null;
+let mapInitialized = false;
+let mapApiKey = null;
 
 // Expose handles globally for toolbar-utils.js
 window._issueManager = null;
@@ -103,8 +106,25 @@ try {
     } else {
         login.innerText = 'Login';
         login.onclick = () => window.location.replace('/api/auth/login');
-        login.style.visibility = 'visible';
     }
+    login.style.visibility = 'visible';
+
+    // 7. Load Map Config
+    try {
+        const cfgResp = await fetch('/api/config/maps');
+        if (cfgResp.ok) {
+            const cfg = await cfgResp.json();
+            mapApiKey = cfg.apiKey;
+        } else {
+            console.warn('Map configuration fetch failed.');
+        }
+    } catch (err) {
+        console.warn('Could not load maps config:', err.message);
+    }
+
+    // 8. Bind Tab Events
+    setupTabs();
+
 } catch (err) {
     console.error('Initialization error:', err);
     login.style.visibility = 'visible';
@@ -692,3 +712,143 @@ document.addEventListener('DOMContentLoaded', () => {
         };
     }
 });
+
+// ── Tab Management ────────────────────────────────────────────────────────────
+function setupTabs() {
+    const headerMapBtn = document.getElementById('header-map-btn');
+    const tabProjects = document.getElementById('tab-projects');
+    const dashboard = document.getElementById('project-selection-dashboard');
+    const mapContainer = document.getElementById('map-container');
+    const preview = document.getElementById('preview');
+
+    if (!headerMapBtn || !tabProjects) return;
+
+    headerMapBtn.onclick = async () => {
+        // Toggle behavior for header button
+        const isMapVisible = mapContainer.style.display === 'block';
+
+        if (isMapVisible) {
+            // Already in map, switch back to projects
+            headerMapBtn.classList.remove('active');
+            tabProjects.classList.add('active');
+            if (dashboard) dashboard.style.display = 'flex';
+            mapContainer.style.display = 'none';
+        } else {
+            // Switch to map
+            tabProjects.classList.remove('active');
+            headerMapBtn.classList.add('active');
+
+            // Hide other panels
+            if (dashboard) dashboard.style.display = 'none';
+            if (preview) preview.style.display = 'none';
+
+            // Show Map
+            mapContainer.style.display = 'block';
+
+            if (!mapInitialized) {
+                if (mapApiKey) {
+                    try {
+                        await initMap('map-container', mapApiKey);
+                        mapInitialized = true;
+                        await loadHubsOnMap();
+                    } catch (err) {
+                        console.error('Map init error:', err);
+                        mapContainer.style.display = 'none';
+                        headerMapBtn.classList.remove('active');
+                        tabProjects.classList.add('active');
+                        if (dashboard) dashboard.style.display = 'flex';
+                        alert('지도를 불러오는 중 오류가 발생했습니다: ' + err.message);
+                    }
+                } else {
+                    // API key missing or still fetching
+                    mapContainer.style.display = 'none';
+                    headerMapBtn.classList.remove('active');
+                    tabProjects.classList.add('active');
+                    if (dashboard) dashboard.style.display = 'flex';
+                    alert('.env 파일에 VWORLD_API_KEY 또는 GOOGLE_MAPS_API_KEY 설정이 필요합니다.');
+                }
+            } else {
+                setTimeout(() => resizeMap(), 100);
+            }
+        }
+    };
+
+    tabProjects.onclick = () => {
+        headerMapBtn.classList.remove('active');
+        tabProjects.classList.add('active');
+
+        if (dashboard) dashboard.style.display = 'flex';
+        mapContainer.style.display = 'none';
+    };
+}
+
+async function loadHubsOnMap() {
+    try {
+        const hubs = await fetch('/api/hubs').then(r => r.json());
+        const allProjects = [];
+
+        for (const hub of hubs) {
+            if (!hub.id) continue;
+            const projects = await fetch(`/api/hubs/${hub.id}/projects`).then(r => r.json());
+
+            for (const p of projects) {
+                let lat = p.latitude ? parseFloat(p.latitude) : null;
+                let lng = p.longitude ? parseFloat(p.longitude) : null;
+                let address = '';
+                let hasRealLocation = !!(lat && lng);
+
+                if (!hasRealLocation) {
+                    const street = [p.addressLine1, p.addressLine2].filter(Boolean).join('');
+                    const candidates = [
+                        [p.stateOrProvince, p.city, street].filter(Boolean).join(' '),
+                        [p.stateOrProvince, p.city, p.addressLine1].filter(Boolean).join(' '),
+                        [p.stateOrProvince, p.city].filter(Boolean).join(' '),
+                        p.postalCode || '',
+                        p.city || '',
+                    ].filter(Boolean);
+
+                    for (const candidate of candidates) {
+                        try {
+                            const params = new URLSearchParams({ address: candidate });
+                            if (candidate === p.postalCode) params.set('postalCode', p.postalCode);
+                            const geo = await fetch(`/api/geocode?${params}`).then(r => r.json());
+                            if (geo.lat && geo.lng) {
+                                lat = geo.lat;
+                                lng = geo.lng;
+                                address = candidate;
+                                hasRealLocation = true;
+                                break;
+                            }
+                        } catch (e) { }
+                    }
+                    if (!hasRealLocation) {
+                        address = candidates[0] || '';
+                    }
+                } else {
+                    address = `${p.city || ''} ${p.stateOrProvince || ''}`.trim();
+                }
+
+                allProjects.push({
+                    id: p.id,
+                    name: p.name,
+                    hubId: hub.id,
+                    hubName: hub.name,
+                    address: address || '주소 미설정',
+                    lat: lat ?? (36.5 + (Math.random() - 0.5) * 2),
+                    lng: lng ?? (127.5 + (Math.random() - 1.5) * 2),
+                    hasRealLocation: !!(lat && lng),
+                });
+            }
+        }
+
+        if (allProjects.length > 0) {
+            addProjectMarkers(allProjects, (project) => {
+                flyToLocation(project.lat, project.lng, 5000);
+            });
+            const firstReal = allProjects.find(p => p.hasRealLocation) || allProjects[0];
+            flyToLocation(firstReal.lat, firstReal.lng, 200000);
+        }
+    } catch (err) {
+        console.warn('Map hub load error:', err.message);
+    }
+}

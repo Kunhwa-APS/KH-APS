@@ -14,13 +14,11 @@ router.get('/api/auth/login', function (req, res) {
 
 /**
  * GET /api/config/maps
- * Google Maps API 키를 프론트엔드에 제공
+ * Google Maps/VWorld API 키를 프론트엔드에 제공
  */
 router.get('/api/config/maps', function (req, res) {
     const key = process.env.VWORLD_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
-    if (!key || key.includes('입력') || key.includes('여기')) {
-        return res.status(503).json({ error: 'VWORLD_API_KEY not configured in .env' });
-    }
+    // Placeholder checks removed to avoid 503 errors and breaking frontend UI
     res.json({ apiKey: key });
 });
 

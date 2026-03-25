@@ -29,6 +29,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 
+    <!-- Cesium (VWorld 3D Map) -->
+    <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css">
+
     <!-- Custom Styles -->
     <link rel="stylesheet" href="/css/style.css" />
 
@@ -56,6 +59,9 @@
             </div>
         </div>
         <div class="header-right">
+            <button id="header-map-btn" class="header-map-btn">
+                <i class="fas fa-map-marked-alt"></i> 🗺️ 지도
+            </button>
             <div class="status-badge" id="status-badge">
                 <span class="status-dot connected"></span>
                 <span id="status-text">APS Connected</span>
@@ -160,6 +166,9 @@
             <!-- Normal Single Viewer -->
             <div id="preview"></div>
 
+            <!-- Map Panel -->
+            <div id="map-container" style="display:none; width: 100%; height: 100%;"></div>
+
             <!-- Project Selection Dashboard -->
             <div id="project-selection-dashboard" class="project-dashboard">
                 <div class="dashboard-header">
@@ -172,7 +181,7 @@
                 </div>
                 <div class="dashboard-tabs-container">
                     <div class="dashboard-tabs">
-                        <button class="tab-btn active">프로젝트</button>
+                        <button class="tab-btn active" id="tab-projects">프로젝트</button>
                         <button class="tab-btn">프로젝트 템플릿</button>
                     </div>
                 </div>
@@ -699,6 +708,9 @@
 
     <!-- ── Toast Notification ─────────────────────────────────────────────── -->
     <div class="toast-container" id="toast-container"></div>
+
+    <!-- Cesium JS -->
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
 
     <!-- ── Scripts ────────────────────────────────────────────────────────── -->
     <!-- ai-panel uses non-module approach, load first -->

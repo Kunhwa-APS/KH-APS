@@ -48,15 +48,15 @@ router.get('/api/hubs/:hub_id/projects', async function (req, res, next) {
             return {
                 id: project.id,
                 name: project.attributes.name,
-                addressLine1:    ext.addressLine1    || '',
-                addressLine2:    ext.addressLine2    || '',
-                city:            ext.city            || '',
+                addressLine1: ext.addressLine1 || '',
+                addressLine2: ext.addressLine2 || '',
+                city: ext.city || '',
                 stateOrProvince: ext.stateOrProvince || '',
-                postalCode:      ext.postalCode      || '',
-                country:         ext.country         || '',
+                postalCode: ext.postalCode || '',
+                country: ext.country || '',
                 // 일부 ACC 프로젝트는 직접 위경도 제공
-                latitude:        ext.latitude        || null,
-                longitude:       ext.longitude       || null,
+                latitude: ext.latitude || null,
+                longitude: ext.longitude || null,
             };
         });
 
@@ -80,14 +80,14 @@ router.get('/api/hubs/:hub_id/projects', async function (req, res, next) {
                 const accountId = req.params.hub_id.replace(/^b\./, '');
                 // 프로젝트 ID에서 'b.' 접두어 제거 -> projectId
                 const projectId = p.id.replace(/^b\./, '');
-                
+
                 // ACC Admin API로 프로젝트 상세 조회 시도
                 const response = await fetch(`https://developer.api.autodesk.com/hq/v1/accounts/${accountId}/projects/${projectId}`, {
                     headers: {
                         'Authorization': `Bearer ${twoLeggedToken}`
                     }
                 });
-                
+
                 if (response.ok) {
                     const hqData = await response.json();
                     if (hqData.address_line_1 || hqData.city) {
@@ -105,7 +105,7 @@ router.get('/api/hubs/:hub_id/projects', async function (req, res, next) {
                     const errText = await response.text();
                     console.warn(`[ACC HQ API] Failed for "${p.name}": ${response.status} ${response.statusText}`, errText);
                 }
-            } catch (e) { 
+            } catch (e) {
                 console.error(`[ACC HQ API] Error fetching "${p.name}":`, e.message);
             }
             return p;
@@ -129,11 +129,27 @@ router.get('/api/hubs/:hub_id/projects/:project_id/contents', async function (re
             req.query.folder_id,
             req.internalOAuthToken.access_token
         );
-        res.json(entries.map(entry => ({
-            id: entry.id,
-            name: entry.attributes.displayName,
-            folder: entry.type === 'folders'
-        })));
+        res.json(entries.map(entry => {
+            const isFolder = entry.type === 'folders';
+            let vNumber = 1;
+            let urn = null;
+            if (!isFolder && entry.relationships && entry.relationships.tip) {
+                const tipId = entry.relationships.tip.data.id;
+                // Parse version number from ID: '...&version=2' or '...:vf.abcd...v2' or '...:v2'
+                const match = tipId.match(/[?&]version=(\d+)/i) || tipId.match(/:v(\d+)$/i) || tipId.match(/\.vf\..+v(\d+)$/i);
+                vNumber = match ? parseInt(match[1]) : 1;
+
+                // Encode URN for the viewer: Base64 without padding
+                urn = Buffer.from(tipId).toString('base64').replace(/=/g, '');
+            }
+            return {
+                id: entry.id,
+                name: entry.attributes.displayName,
+                folder: isFolder,
+                vNumber,
+                urn
+            };
+        }));
     } catch (err) {
         next(err);
     }
@@ -150,10 +166,21 @@ router.get('/api/hubs/:hub_id/projects/:project_id/contents/:item_id/versions', 
             req.params.item_id,
             req.internalOAuthToken.access_token
         );
-        res.json(versions.map(version => ({
-            id: version.id,
-            name: version.attributes.createTime
-        })));
+        res.json(versions.map(version => {
+            let vNumber = version.attributes.versionNumber;
+            if (vNumber === undefined || vNumber === null) {
+                const match = version.id.match(/[?&]version=(\d+)/i) || version.id.match(/:v(\d+)$/i);
+                vNumber = match ? parseInt(match[1]) : 0;
+            }
+            return {
+                id: version.id,
+                name: version.attributes.createTime,
+                displayName: version.attributes.displayName || version.attributes.createTime,
+                vNumber: vNumber,
+                createUserName: version.attributes.createUserName,
+                urn: Buffer.from(version.id).toString('base64').replace(/=/g, '')
+            };
+        }));
     } catch (err) {
         next(err);
     }

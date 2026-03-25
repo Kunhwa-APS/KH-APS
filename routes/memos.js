@@ -28,14 +28,13 @@ router.post('/api/version-memo', authRefreshMiddleware, async (req, res) => {
 });
 
 /**
- * GET /api/version-memo/*
+ * GET /api/version-memo/:urn
  * Retrieves a memo for a specific version.
  */
-router.get('/api/version-memo/*', authRefreshMiddleware, async (req, res) => {
+router.get('/api/version-memo/:urn', authRefreshMiddleware, async (req, res) => {
     try {
-        // req.params[0] captures the wildcard part after /api/version-memo/
-        const versionUrn = req.params[0];
-        console.log('[Memos] GET /api/version-memo/* - URN:', versionUrn);
+        const versionUrn = req.params.urn;
+        console.log('[Memos] GET /api/version-memo/:urn - URN:', versionUrn);
 
         const memo = getMemo(versionUrn);
         res.json(memo);
