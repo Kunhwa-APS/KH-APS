@@ -198,7 +198,7 @@
                     </td>
                     {{/if}}
 
-                    {{#if ../sf.workType}}
+                    {{#if ../sf.work_type}}
                     <th class="col-work label-cell">공종</th>
                     <td class="col-work-val data-cell">{{#if pdf_work_type}}{{pdf_work_type}}{{else}}[MISSING]{{/if}}
                     </td>
@@ -210,7 +210,7 @@
                 {{#if ../sf.description}}
                 <tr>
                     <td class="label-cell">간섭 내용</td>
-                    <td colspan="100" class="desc-cell">{{description}}</td>
+                    <td colspan="{{../sf.colspan}}" class="desc-cell">{{description}}</td>
                 </tr>
                 {{/if}}
 
@@ -218,16 +218,16 @@
                 {{#if ../sf.resolution}}
                 <tr>
                     <td class="label-cell">수정사항</td>
-                    <td colspan="100" class="desc-cell">{{resolution_description}}</td>
+                    <td colspan="{{../sf.colspan}}" class="desc-cell">{{resolution_description}}</td>
                 </tr>
                 {{/if}}
 
                 <!-- ── 캡쳐이미지 ──────────────────────────────────── -->
-                {{#if ../sf.images}}
+                {{#if ../sf.screenshot}}
                 {{#if (eq status "Closed")}}
                 {{!-- CLOSED: 50/50 Before vs After via nested table --}}
                 <tr>
-                    <td colspan="100" style="padding:0;border:1px solid #777;">
+                    <td colspan="{{../sf.totalCols}}" style="padding:0;border:1px solid #777;">
                         <table class="image-inner-table">
                             <thead>
                                 <tr>
@@ -256,10 +256,10 @@
                 {{else}}
                 {{!-- OPEN: Single full-width image --}}
                 <tr>
-                    <th colspan="100">이 미 지</th>
+                    <th colspan="{{../sf.totalCols}}">이 미 지</th>
                 </tr>
                 <tr>
-                    <td colspan="100" class="image-full-cell">
+                    <td colspan="{{../sf.totalCols}}" class="image-full-cell">
                         {{#if thumbnail}}
                         <img src="{{thumbnail}}" class="centered-image" alt="Open Issue" />
                         {{/if}}

@@ -23,14 +23,24 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         const sf = {
             no: rawSf.no !== false,
             structure: rawSf.structure !== false,
-            workType: rawSf.workType !== false,
+            work_type: rawSf.work_type !== false || rawSf.workType !== false,
             description: rawSf.description !== false,
             resolution: rawSf.resolution !== false,
-            images: rawSf.images !== false,
+            screenshot: rawSf.screenshot !== false || rawSf.images !== false
         };
 
-        // Pre-compute combined flag for use in HBS (avoids need for a custom 'or' helper)
-        sf.hasMetaRow = sf.no || sf.structure || sf.workType;
+        // Pre-compute combined flag for use in HBS
+        sf.hasMetaRow = sf.no || sf.structure || sf.work_type;
+
+        // Calculate colspan for Description/Resolution rows: (No:2 + Struct:2 + Work:2)
+        let totalCols = 0;
+        if (sf.no) totalCols += 2;
+        if (sf.structure) totalCols += 2;
+        if (sf.work_type) totalCols += 2;
+        sf.colspan = Math.max(1, totalCols - 1);
+        sf.totalCols = Math.max(1, totalCols);
+        sf.halfCols = Math.max(1, Math.floor(totalCols / 2));
+
         console.log('[Issues PDF] selectedFields:', sf);
 
         // Map each raw issue to the template fields
@@ -61,11 +71,9 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         });
 
         // 2. Read & compile Handlebars template
-        if (issues.length > 0) {
-            console.log("PDF 생성 직전 데이터 보정 결과:", JSON.stringify(issues[0], null, 2));
-            console.log("서버가 받은 원본 데이터 샘플:", JSON.stringify(issuesRaw[0], null, 2));
-        }
+        const templateData = { title, logoBase64, issues, sf };
         const templatePath = path.join(__dirname, '..', 'views', 'issue-report.hbs');
+
         const templateHtml = fs.readFileSync(templatePath, 'utf8');
         const template = handlebars.compile(templateHtml);
         const html = template({ title, logoBase64, issues, sf });

@@ -653,10 +653,10 @@ export class IssueManager {
                 const sf = {
                     no: document.getElementById('pdf-field-no').checked,
                     structure: document.getElementById('pdf-field-structure').checked,
-                    workType: document.getElementById('pdf-field-worktype').checked,
+                    work_type: document.getElementById('pdf-field-worktype').checked,
                     description: document.getElementById('pdf-field-description').checked,
                     resolution: document.getElementById('pdf-field-resolution').checked,
-                    images: document.getElementById('pdf-field-images').checked
+                    screenshot: document.getElementById('pdf-field-images').checked
                 };
 
                 // [New] 2. Filter Issues based on Checkboxes in Modal
@@ -992,6 +992,7 @@ export class IssueManager {
 
         const payloadString = JSON.stringify(payload);
         const totalSizeMB = (payloadString.length / (1024 * 1024)).toFixed(2);
+
         console.log(`[PDF Export] Final payload being sent to server. Total Size: ${totalSizeMB} MB`, {
             issuesCount: enrichedIssues.length,
             title
