@@ -167,24 +167,35 @@ export class IssueManager {
     _onIssueClick(e) {
         console.log('[IssueManager] Click detected -> beginning instant capture flow');
 
-        // [Fix] 즉각적인 레이캐스팅(hitTest) 실행
-        const result = this.viewer.impl.hitTest(e.clientX, e.clientY, true);
+        // [Fix] 1. 좌표 보정: 브라우저 뷰포트(clientX/Y)에서 뷰어 컨테이너의 위치(getBoundingClientRect)를 차감
+        const rect = this.viewer.container.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        // [Fix] 2. 디버깅 로그 추가 (좌표 및 오프셋 확인용)
+        console.log(`[IssueManager] Coordinate Debug:
+            - ClientX/Y: (${e.clientX}, ${e.clientY})
+            - ViewerRect: (L:${rect.left.toFixed(1)}, T:${rect.top.toFixed(1)}, W:${rect.width}, H:${rect.height})
+            - Adjusted X/Y: (${x.toFixed(1)}, ${y.toFixed(1)})`);
+
+        // [Fix] 3. 보정된 좌표로 Hit Test 실행
+        // 세 번째 인자 true는 투명한 객체를 무시하고 실제 지오메트리를 찾도록 함
+        const result = this.viewer.impl.hitTest(x, y, true);
 
         if (result && result.dbId) {
-            console.log(`[IssueManager] Object hit (dbId: ${result.dbId}). Opening modal immediately.`);
+            console.log(`[IssueManager] Hit Success! dbId: ${result.dbId}, Point:`, result.intersectPoint);
 
-            // [Fix] 객체를 맞췄다면 즉시 모드 종료 (팝업 방해 방지)
+            // [Fix] 객체를 맞췄다면 즉시 생성 모드 종료
             this.toggleCreationMode(false);
 
-            // [Fix] 화면 이동이나 딜레이 없이 팝업창 즉시 강제 호출
+            // 모달 즉시 호출
             this.showCreateModal(result.dbId, result.intersectPoint, null);
 
             console.log('[IssueManager] Starting async capture for thumbnail...');
             this.captureIssueThumbnail((base64) => {
                 const modal = document.getElementById('issue-modal');
-                // Only inject if the modal is still open and matches this dbId
                 if (modal && modal.style.display === 'flex' && modal.dataset.dbId == result.dbId) {
-                    console.log('[IssueManager] Capture complete -> Injecting thumbnail into modal.');
+                    console.log('[IssueManager] Capture complete -> Injecting thumbnail');
                     modal.dataset.thumbnail = base64;
                     const previewContainer = document.getElementById('modal-image-preview');
                     const previewImg = document.getElementById('issue-preview-img');
@@ -192,14 +203,25 @@ export class IssueManager {
                         previewImg.src = base64;
                         previewContainer.style.display = 'flex';
                     }
-                } else {
-                    console.log('[IssueManager] Modal closed before capture finished. Discarding image.');
                 }
             });
         } else {
-            console.log('[IssueManager] No object at click location');
-            // [Fix] 빈 공간 클릭 시 안전한 안내 후 모드 종료 (크래시 방지)
-            alert('빈 공간을 클릭했습니다. 모델 위를 클릭해주세요.');
+            console.log('[IssueManager] Hit Failed: No object at adjusted location.');
+
+            // [Fix] 4. 감도 보조 로직 (주변 5px 범위 내에서 재검색 시도) - 선택 사항이나 안정성 위해 추가
+            let retryResult = null;
+            const offsets = [[-3, 0], [3, 0], [0, -3], [0, 3]];
+            for (let offset of offsets) {
+                retryResult = this.viewer.impl.hitTest(x + offset[0], y + offset[1], true);
+                if (retryResult && retryResult.dbId) {
+                    console.log(`[IssueManager] Hit Success on retry (offset ${offset})! dbId: ${retryResult.dbId}`);
+                    this.toggleCreationMode(false);
+                    this.showCreateModal(retryResult.dbId, retryResult.intersectPoint, null);
+                    return;
+                }
+            }
+
+            alert('빈 공간을 클릭했습니다. 모델 위를 클릭해주세요.\n(클릭 위치가 모델의 아주 미세한 경계일 수 있습니다.)');
             this.toggleCreationMode(false);
         }
     }
@@ -597,6 +619,7 @@ export class IssueManager {
             modal.dataset.issueId = '';
 
             this.setupPdfModalListeners();
+            this._populatePdfItemList();
             modal.style.display = 'flex';
         };
     }
@@ -625,6 +648,20 @@ export class IssueManager {
                     if (issue) issuesToExport = [issue];
                 }
 
+                // [PDF Item Selector] Filter by checked checkboxes
+                const checkedEls = [...document.querySelectorAll('#pdf-item-list input[type="checkbox"]:checked')];
+                if (checkedEls.length > 0) {
+                    const checkedIds = checkedEls.map(el => parseInt(el.dataset.id));
+                    issuesToExport = issuesToExport.filter(i => checkedIds.includes(i.id));
+                }
+
+                if (issuesToExport.length === 0) {
+                    alert('포함할 항목을 하나 이상 선택해주세요.');
+                    runBtn.textContent = 'Generate PDF';
+                    runBtn.disabled = false;
+                    return;
+                }
+
                 await this.exportToPdf(issuesToExport);
             } catch (err) {
                 console.error('[PDF Export] Listener error:', err);
@@ -634,6 +671,52 @@ export class IssueManager {
                 modal.style.display = 'none';
             }
         };
+    }
+
+    _populatePdfItemList() {
+        const listEl = document.getElementById('pdf-item-list');
+        const selectAllBtn = document.getElementById('pdf-select-all-btn');
+        if (!listEl) return;
+
+        const issues = this.exportPayload || [];
+
+        if (issues.length === 0) {
+            listEl.innerHTML = '<p style="color:#94a3b8;font-size:12px;margin:0;padding:6px 0;">표시할 이슈가 없습니다.</p>';
+            return;
+        }
+
+        listEl.innerHTML = issues.map(issue => {
+            const label = issue.issue_number
+                ? `[${issue.issue_number}] ${issue.title}`
+                : `[#${issue.id}] ${issue.title}`;
+            const statusColor = issue.status === 'Closed' ? '#10b981' : '#f59e0b';
+            return `
+                <label style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-radius:4px;cursor:pointer;font-size:13px;color:#1e293b;user-select:none;" class="pdf-item-label">
+                    <input type="checkbox" data-id="${issue.id}" checked
+                        style="cursor:pointer;accent-color:#6366f1;width:15px;height:15px;flex-shrink:0;" />
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusColor};flex-shrink:0;"></span>
+                    <span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${label}">${label}</span>
+                </label>
+            `;
+        }).join('');
+
+        // Hover effect
+        listEl.querySelectorAll('.pdf-item-label').forEach(lbl => {
+            lbl.addEventListener('mouseenter', () => lbl.style.background = '#f1f5f9');
+            lbl.addEventListener('mouseleave', () => lbl.style.background = '');
+        });
+
+        // "전체 선택" button toggle
+        if (selectAllBtn) {
+            selectAllBtn.onclick = () => {
+                const allChecks = listEl.querySelectorAll('input[type="checkbox"]');
+                const allChecked = [...allChecks].every(c => c.checked);
+                allChecks.forEach(c => { c.checked = !allChecked; });
+                selectAllBtn.textContent = allChecked ? '전체 선택' : '전체 해제';
+            };
+        }
+
+        console.log(`[PdfItemList] Rendered ${issues.length} items.`);
     }
 
     showEditModal(id) {
@@ -786,7 +869,11 @@ export class IssueManager {
         modal.dataset.batchIssues = '';
         modal.dataset.issueId = issueId;
 
+        // [PDF Item Selector] Set export payload so the list can be populated
+        this.exportPayload = [issue];
+
         this.setupPdfModalListeners();
+        this._populatePdfItemList();
         modal.style.display = 'flex';
     }
 
