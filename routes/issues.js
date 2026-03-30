@@ -18,6 +18,20 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         const title = data.title || '이슈 해결 결과 보고서';
         const logoBase64 = data.logoBase64 || '';
 
+        // [Field Selector] Build field visibility flags — default all true for backward compat
+        const rawSf = data.selectedFields || {};
+        const sf = {
+            no: rawSf.no !== false,
+            structure: rawSf.structure !== false,
+            workType: rawSf.workType !== false,
+            description: rawSf.description !== false,
+            resolution: rawSf.resolution !== false,
+            images: rawSf.images !== false,
+        };
+        // Pre-compute combined flag for use in HBS (avoids need for a custom 'or' helper)
+        sf.hasMetaRow = sf.no || sf.structure || sf.workType;
+        console.log('[Issues PDF] selectedFields:', sf);
+
         // Map each raw issue to the template fields
         // status is passed as-is so {{#if (eq status "Closed")}} works in HBS
         const issues = issuesRaw.map((issue, idx) => {
@@ -53,7 +67,7 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         const templatePath = path.join(__dirname, '..', 'views', 'issue-report.hbs');
         const templateHtml = fs.readFileSync(templatePath, 'utf8');
         const template = handlebars.compile(templateHtml);
-        const html = template({ title, logoBase64, issues });
+        const html = template({ title, logoBase64, issues, sf });
 
         // 3. Launch Puppeteer with generous timeout for many images
         const browser = await puppeteer.launch({

@@ -632,6 +632,17 @@ export class IssueManager {
         document.getElementById('close-pdf-modal').onclick = () => { modal.style.display = 'none'; };
         document.getElementById('cancel-pdf-btn').onclick = () => { modal.style.display = 'none'; };
 
+        // [Field Selector] 전체 선택/해제 버튼
+        const fieldAllBtn = document.getElementById('pdf-field-select-all-btn');
+        if (fieldAllBtn) {
+            fieldAllBtn.onclick = () => {
+                const fieldChecks = document.querySelectorAll('#pdf-field-list input[type="checkbox"]');
+                const allChecked = [...fieldChecks].every(c => c.checked);
+                fieldChecks.forEach(c => { c.checked = !allChecked; });
+                fieldAllBtn.textContent = allChecked ? '전체 선택' : '전체 해제';
+            };
+        }
+
         document.getElementById('run-pdf-export-btn').onclick = async () => {
             const runBtn = document.getElementById('run-pdf-export-btn');
             runBtn.textContent = 'Generating...';
@@ -911,7 +922,16 @@ export class IssueManager {
         const payload = {
             title,
             logoBase64,
-            issues: enrichedIssues
+            issues: enrichedIssues,
+            // [Field Selector] Read which fields the user wants in the PDF
+            selectedFields: {
+                no: document.getElementById('pdf-field-no')?.checked !== false,
+                structure: document.getElementById('pdf-field-structure')?.checked !== false,
+                workType: document.getElementById('pdf-field-worktype')?.checked !== false,
+                description: document.getElementById('pdf-field-description')?.checked !== false,
+                resolution: document.getElementById('pdf-field-resolution')?.checked !== false,
+                images: document.getElementById('pdf-field-images')?.checked !== false,
+            }
         };
 
         // [FINAL END-TO-END TRACE] CRITICAL: Check this in console!

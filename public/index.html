@@ -657,6 +657,42 @@
                         style="background: none; padding: 0; border: none; width: 100%;">
                     <small style="color: #94a3b8; font-size: 11px;">Recommended size: max 150x50px</small>
                 </div>
+                <!-- ── PDF Field Selector ────────────────────────────── -->
+                <div class="form-group" id="pdf-field-selector-group">
+                    <label style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <span>데이터 항목 선택</span>
+                        <button type="button" id="pdf-field-select-all-btn"
+                            style="font-size:11px;padding:2px 10px;border:1px solid #a5b4fc;border-radius:4px;background:#eef2ff;cursor:pointer;color:#4f46e5;font-weight:600;">전체
+                            선택</button>
+                    </label>
+                    <div id="pdf-field-list"
+                        style="display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;">
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-no" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> No
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-structure" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> 구조물
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-worktype" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> 공종
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-description" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> 간섭 내용
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-resolution" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> 수정사항
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-images" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> 캡쳐이미지
+                        </label>
+                    </div>
+                </div>
                 <!-- ── PDF Item Selector ─────────────────────────────── -->
                 <div class="form-group" id="pdf-item-selector-group">
                     <label style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">

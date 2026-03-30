@@ -53,11 +53,9 @@
         /* ─── Table ───────────────────────────────────── */
         .issue-report-table {
             table-layout: fixed !important;
-            /* Force cell widths to be respected */
             width: 100% !important;
             border-collapse: collapse;
             word-wrap: break-word;
-            /* Ensure text doesn't push the table width */
         }
 
         th,
@@ -86,27 +84,27 @@
         }
 
         .col-no {
-            width: 10%;
+            width: 15%;
         }
 
         .col-no-val {
-            width: 15%;
+            width: 18%;
         }
 
         .col-struct {
-            width: 25%;
+            width: 15%;
         }
 
         .col-struct-val {
-            width: 25%;
+            width: 18%;
         }
 
         .col-work {
-            width: 10%;
+            width: 15%;
         }
 
         .col-work-val {
-            width: 15%;
+            width: 19%;
         }
 
         .desc-cell {
@@ -115,11 +113,9 @@
             min-height: 36px;
         }
 
-        /* ─── CLOSED: 50:50 ratio comparison ──────────── */
+        /* ─── Image cells (nested table approach) ──────── */
         .image-half-cell {
             width: 50% !important;
-            min-width: 50% !important;
-            max-width: 50% !important;
             height: 380px !important;
             text-align: center;
             vertical-align: middle;
@@ -137,7 +133,6 @@
             margin: 0 auto;
         }
 
-        /* ─── OPEN: Full width centered ───────────────── */
         .image-full-cell {
             width: 100% !important;
             height: 420px !important;
@@ -155,6 +150,18 @@
             object-fit: contain;
             display: block;
             margin: 0 auto;
+        }
+
+        /* ─── Nested image table ────────────────────────── */
+        .image-inner-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .image-inner-table th,
+        .image-inner-table td {
+            border: 1px solid #777;
         }
     </style>
 </head>
@@ -176,58 +183,87 @@
 
         <table class="issue-report-table">
             <tbody>
-                <!-- Metadata Row -->
+
+                <!-- ── Metadata Row (No / 구조물 / 공종) ────────────── -->
+                {{#if ../sf.hasMetaRow}}
                 <tr>
+                    {{#if ../sf.no}}
                     <th class="col-no">NO.</th>
                     <td class="col-no-val">{{issueId}}</td>
+                    {{/if}}
+                    {{#if ../sf.structure}}
                     <th class="col-struct label-cell">구조물</th>
                     <td class="col-struct-val data-cell">{{#if pdf_structure}}{{pdf_structure}}{{else}}[MISSING]{{/if}}
                     </td>
+                    {{/if}}
+                    {{#if ../sf.workType}}
                     <th class="col-work label-cell">공종</th>
                     <td class="col-work-val data-cell">{{#if pdf_work_type}}{{pdf_work_type}}{{else}}[MISSING]{{/if}}
                     </td>
+                    {{/if}}
                 </tr>
-                <!-- Description Rows -->
+                {{/if}}
+
+                <!-- ── 간섭 내용 Row ──────────────────────────────── -->
+                {{#if ../sf.description}}
                 <tr>
                     <td class="label-cell">간섭 내용</td>
-                    <td colspan="5" class="desc-cell">{{description}}</td>
+                    <td colspan="100" class="desc-cell">{{description}}</td>
                 </tr>
+                {{/if}}
+
+                <!-- ── 수정사항 Row ────────────────────────────────── -->
+                {{#if ../sf.resolution}}
                 <tr>
                     <td class="label-cell">수정사항</td>
-                    <td colspan="5" class="desc-cell">{{resolution_description}}</td>
+                    <td colspan="100" class="desc-cell">{{resolution_description}}</td>
                 </tr>
+                {{/if}}
 
+                <!-- ── 캡쳐이미지 ──────────────────────────────────── -->
+                {{#if ../sf.images}}
                 {{#if (eq status "Closed")}}
-                {{!-- == CLOSED Status: 50/50 Before vs After == --}}
+                {{!-- CLOSED: 50/50 Before vs After via nested table --}}
                 <tr>
-                    <th colspan="3" style="width: 50% !important;">변경 전</th>
-                    <th colspan="3" style="width: 50% !important;">변경 후</th>
-                </tr>
-                <tr>
-                    <td colspan="3" class="image-half-cell">
-                        {{#if thumbnail}}
-                        <img src="{{thumbnail}}" alt="Before" />
-                        {{/if}}
-                    </td>
-                    <td colspan="3" class="image-half-cell">
-                        {{#if after_snapshot_url}}
-                        <img src="{{after_snapshot_url}}" alt="After" />
-                        {{/if}}
+                    <td colspan="100" style="padding:0;border:1px solid #777;">
+                        <table class="image-inner-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:50%;">변경 전</th>
+                                    <th style="width:50%;">변경 후</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td class="image-half-cell">
+                                        {{#if thumbnail}}
+                                        <img src="{{thumbnail}}" alt="Before" />
+                                        {{/if}}
+                                    </td>
+                                    <td class="image-half-cell">
+                                        {{#if after_snapshot_url}}
+                                        <img src="{{after_snapshot_url}}" alt="After" />
+                                        {{/if}}
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </td>
                 </tr>
 
                 {{else}}
-                {{!-- == OPEN Status: Single full-width image == --}}
+                {{!-- OPEN: Single full-width image --}}
                 <tr>
-                    <th colspan="6">이 미 지</th>
+                    <th colspan="100">이 미 지</th>
                 </tr>
                 <tr>
-                    <td colspan="6" class="image-full-cell">
+                    <td colspan="100" class="image-full-cell">
                         {{#if thumbnail}}
                         <img src="{{thumbnail}}" class="centered-image" alt="Open Issue" />
                         {{/if}}
                     </td>
                 </tr>
+                {{/if}}
                 {{/if}}
 
             </tbody>
