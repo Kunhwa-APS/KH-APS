@@ -18,8 +18,8 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         const title = data.title || '이슈 해결 결과 보고서';
         const logoBase64 = data.logoBase64 || '';
 
-        // [Field Selector] Build field visibility flags — default all true for backward compat
-        const rawSf = data.selectedFields || {};
+        // [Field Selector] Build field visibility flags — use data.selectedFields if available, fallback to data.sf
+        const rawSf = data.selectedFields || data.sf || {};
         const sf = {
             no: rawSf.no !== false,
             structure: rawSf.structure !== false,
@@ -28,6 +28,7 @@ router.post('/api/issues/export-pdf', async (req, res) => {
             resolution: rawSf.resolution !== false,
             images: rawSf.images !== false,
         };
+
         // Pre-compute combined flag for use in HBS (avoids need for a custom 'or' helper)
         sf.hasMetaRow = sf.no || sf.structure || sf.workType;
         console.log('[Issues PDF] selectedFields:', sf);

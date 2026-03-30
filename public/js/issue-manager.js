@@ -649,17 +649,28 @@ export class IssueManager {
             runBtn.disabled = true;
 
             try {
-                const singleId = parseInt(modal.dataset.issueId);
-                let issuesToExport = [];
+                // [New] 1. Collect Selected Fields (sf) using consistent IDs
+                const sf = {
+                    no: document.getElementById('pdf-field-no').checked,
+                    structure: document.getElementById('pdf-field-structure').checked,
+                    workType: document.getElementById('pdf-field-worktype').checked,
+                    description: document.getElementById('pdf-field-description').checked,
+                    resolution: document.getElementById('pdf-field-resolution').checked,
+                    images: document.getElementById('pdf-field-images').checked
+                };
 
-                if (this.exportPayload && this.exportPayload.length > 0) {
-                    issuesToExport = [...this.exportPayload];
-                } else if (!isNaN(singleId)) {
-                    const issue = this.issues.find(i => i.id === singleId);
-                    if (issue) issuesToExport = [issue];
+                // [New] 2. Filter Issues based on Checkboxes in Modal
+                const checkedIssueIds = [...document.querySelectorAll('.pdf-issue-check:checked')]
+                    .map(el => parseInt(el.dataset.id));
+
+                let issuesToExport = this.exportPayload.filter(i => checkedIssueIds.includes(i.id));
+
+                if (issuesToExport.length === 0) {
+                    alert('선택된 이슈가 없습니다.');
+                    return;
                 }
 
-                // [PDF Item Selector] Filter by checked checkboxes
+                // [PDF Item Selector] Filter by checked checkboxes in the modal's list
                 const checkedEls = [...document.querySelectorAll('#pdf-item-list input[type="checkbox"]:checked')];
                 if (checkedEls.length > 0) {
                     const checkedIds = checkedEls.map(el => parseInt(el.dataset.id));
@@ -673,7 +684,7 @@ export class IssueManager {
                     return;
                 }
 
-                await this.exportToPdf(issuesToExport);
+                await this.exportToPdf(issuesToExport, sf);
             } catch (err) {
                 console.error('[PDF Export] Listener error:', err);
             } finally {
@@ -682,6 +693,17 @@ export class IssueManager {
                 modal.style.display = 'none';
             }
         };
+
+        // [New] 3. "Select All" Button for Issues
+        const allBtn = document.getElementById('pdf-all-issues-btn');
+        if (allBtn) {
+            allBtn.onclick = () => {
+                const checks = document.querySelectorAll('.pdf-issue-check');
+                const allChecked = [...checks].every(c => c.checked);
+                checks.forEach(c => c.checked = !allChecked);
+                allBtn.textContent = allChecked ? '전체 선택' : '전체 해제';
+            };
+        }
     }
 
     _populatePdfItemList() {
@@ -877,18 +899,43 @@ export class IssueManager {
 
         const modal = document.getElementById('pdf-export-modal');
         if (!modal) return;
-        modal.dataset.batchIssues = '';
-        modal.dataset.issueId = issueId;
 
-        // [PDF Item Selector] Set export payload so the list can be populated
         this.exportPayload = [issue];
+        modal.dataset.issueId = issueId;
 
         this.setupPdfModalListeners();
         this._populatePdfItemList();
         modal.style.display = 'flex';
     }
 
-    async exportToPdf(issuesArray) {
+    _populatePdfIssueList() {
+        const listContainer = document.getElementById('pdf-issue-list');
+        if (!listContainer) return;
+
+        if (!this.exportPayload || this.exportPayload.length === 0) {
+            listContainer.innerHTML = '<p style="font-size:12px; color:#94a3b8;">선택된 이슈가 없습니다.</p>';
+            return;
+        }
+
+        listContainer.innerHTML = this.exportPayload.map(issue => `
+            <label style="display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid #f1f5f9; cursor: pointer; font-size: 13px;">
+                <input type="checkbox" class="pdf-issue-check" data-id="${issue.id}" checked>
+                <span style="font-weight: 600; color: #6366f1; min-width: 80px;">${issue.issue_number || 'N/A'}</span>
+                <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1;">${issue.title}</span>
+            </label>
+        `).join('');
+
+        // Reset Field selectors to checked
+        ['sf-no', 'sf-structure', 'sf-work-type', 'sf-description', 'sf-resolution', 'sf-image'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.checked = true;
+        });
+
+        const allBtn = document.getElementById('pdf-all-issues-btn');
+        if (allBtn) allBtn.textContent = '전체 해제';
+    }
+
+    async exportToPdf(issuesArray, sf = {}) {
         const issuesList = Array.isArray(issuesArray) ? issuesArray : [issuesArray];
 
         // [Diagnostic Alert] Removed as data pipeline is verified.
@@ -923,15 +970,7 @@ export class IssueManager {
             title,
             logoBase64,
             issues: enrichedIssues,
-            // [Field Selector] Read which fields the user wants in the PDF
-            selectedFields: {
-                no: document.getElementById('pdf-field-no')?.checked !== false,
-                structure: document.getElementById('pdf-field-structure')?.checked !== false,
-                workType: document.getElementById('pdf-field-worktype')?.checked !== false,
-                description: document.getElementById('pdf-field-description')?.checked !== false,
-                resolution: document.getElementById('pdf-field-resolution')?.checked !== false,
-                images: document.getElementById('pdf-field-images')?.checked !== false,
-            }
+            selectedFields: sf // Using consistent key expected by server
         };
 
         // [FINAL END-TO-END TRACE] CRITICAL: Check this in console!

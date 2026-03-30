@@ -172,12 +172,12 @@
     <div class="issue-report-page">
 
         <div class="header">
-            {{#if ../logoBase64}}
-            <img src="{{../logoBase64}}" class="header-logo" alt="Logo" />
+            {{#if @root.logoBase64}}
+            <img src="{{@root.logoBase64}}" class="header-logo" alt="Logo" />
             {{else}}
             <div class="header-empty"></div>
             {{/if}}
-            <div class="header-title">{{../title}}</div>
+            <div class="header-title">{{@root.title}}</div>
             <div class="header-empty"></div>
         </div>
 
@@ -191,11 +191,13 @@
                     <th class="col-no">NO.</th>
                     <td class="col-no-val">{{issueId}}</td>
                     {{/if}}
+
                     {{#if ../sf.structure}}
                     <th class="col-struct label-cell">구조물</th>
                     <td class="col-struct-val data-cell">{{#if pdf_structure}}{{pdf_structure}}{{else}}[MISSING]{{/if}}
                     </td>
                     {{/if}}
+
                     {{#if ../sf.workType}}
                     <th class="col-work label-cell">공종</th>
                     <td class="col-work-val data-cell">{{#if pdf_work_type}}{{pdf_work_type}}{{else}}[MISSING]{{/if}}
@@ -271,6 +273,7 @@
 
     </div>
     {{/each}}
+
 
 </body>
 
