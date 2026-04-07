@@ -57,7 +57,12 @@ router.get('/provider', (req, res) => {
     res.json({
         provider: process.env.AI_PROVIDER || 'not configured',
         hasOpenAI: !!process.env.OPENAI_API_KEY,
-        hasGemini: !!process.env.GEMINI_API_KEY
+        hasGemini: !!process.env.GEMINI_API_KEY,
+        ollama: {
+            configured: !!process.env.OLLAMA_HOST,
+            host: process.env.OLLAMA_HOST || 'http://localhost:11434',
+            model: process.env.OLLAMA_MODEL || 'llama3'
+        }
     });
 });
 

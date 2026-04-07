@@ -95,9 +95,53 @@ export function loadModel(viewer, rawId) {
         }
 
         Autodesk.Viewing.Document.load(finalUrn, (doc) => {
-            const viewables = doc.getRoot().getDefaultGeometry();
+            const root = doc.getRoot();
+            const viewables = root.getDefaultGeometry();
             if (!viewables) {
                 return reject(new Error('Document contains no viewable geometry.'));
+            }
+
+            // [추가] 모델 이름 및 버전 정보 UI 업데이트 (에러 방지를 위한 try-catch 및 안전한 접근 방식 사용)
+            try {
+                let modelName = 'Unknown Model';
+                if (root) {
+                    // 1. 최신 규격 시도
+                    if (typeof root.name === 'function') modelName = root.name();
+                    else if (root.data && root.data.name) modelName = root.data.name;
+                    else if (typeof root.getName === 'function') modelName = root.getName();
+                }
+
+                // [추가] 만약 root에서 이름을 못 찾았다면 뷰어 현재 모델 데이터에서 시도 (방어 코드)
+                if ((!modelName || modelName === 'Unknown Model') && viewer.model) {
+                    const modelData = viewer.model.getData();
+                    if (modelData && modelData.name) modelName = modelData.name;
+                    else if (viewer.model.getDocumentNode() && viewer.model.getDocumentNode().data) {
+                        modelName = viewer.model.getDocumentNode().data.name;
+                    }
+                }
+
+                // 파일명에서 버전 정보 추출 시도 (예: ..._V2.rvt)
+                let versionSuffix = '';
+                const vMatch = modelName.match(/_V(\d+)/i) || modelName.match(/ver\.?\s?(\d+)/i);
+                if (vMatch) {
+                    versionSuffix = ` (Ver. ${vMatch[1]})`;
+                }
+
+                const fullDisplayName = modelName + versionSuffix;
+                console.log(`[Viewer] Updating UI title to: ${fullDisplayName}`);
+
+                // [Updated] Use centralized sync utility if available
+                if (window.syncUIState) {
+                    window.syncUIState(fullDisplayName, { urn: finalUrn });
+                } else {
+                    const topBarTitle = document.getElementById('viewer-model-name');
+                    if (topBarTitle) topBarTitle.textContent = fullDisplayName;
+
+                    const infoBarLabel = document.getElementById('model-name-label');
+                    if (infoBarLabel) infoBarLabel.textContent = fullDisplayName;
+                }
+            } catch (titleErr) {
+                console.warn('[Viewer] 제목 업데이트 중 오류 발생 (무시하고 로드 진행):', titleErr);
             }
 
             const onTreeCreated = () => {
@@ -106,6 +150,22 @@ export function loadModel(viewer, rawId) {
                 resolve(doc);
             };
             viewer.addEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, onTreeCreated);
+
+            // [Harness-Context] 모델 로드 완료 시 상태 인식 하네스 가동
+            viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
+                console.log('[Viewer] GEOMETRY_LOADED - Harness-Context 가동');
+                try {
+                    if (window.ContextHarness) {
+                        window.ContextHarness.extract(viewer);
+                    }
+                    if (window.syncUIState) {
+                        const metadataName = viewer.model.getData().metadata?.name || viewer.model.getDocumentNode()?.data.name;
+                        window.syncUIState(metadataName, { urn: finalUrn });
+                    }
+                } catch (loadErr) {
+                    console.error('[Viewer] Context extraction failed:', loadErr);
+                }
+            }, { once: true });
 
             viewer.loadDocumentNode(doc, viewables);
         }, async (code, msg) => {
@@ -270,3 +330,31 @@ window.compareModels = async (urn1, urn2) => {
         alert('모델 비교 로드 중 오류가 발생했습니다.');
     }
 };
+/**
+ * 모델 데이터에서 통계와 요약 정보를 추출합니다.
+ */
+async function extractModelSummary(viewer, model) {
+    if (!model) return null;
+    const summary = {
+        name: model.getData()?.loadOptions?.bubbleNode?.name() || 'Unknown Model',
+        urn: model.getUrn() || 'Unknown URN', // [추가] 모델 고유 URN 추출
+        totalElements: 0,
+        categories: {}
+    };
+
+    const targetCategories = ['Walls', 'Floors', 'Windows', 'Doors', 'Structural Columns', 'Stairs', 'Pipes', 'Ducts', 'Ceilings'];
+
+    const getCount = (cat) => new Promise(res => {
+        viewer.search(cat, (ids) => res(ids.length), (err) => res(0), ['Category']);
+    });
+
+    for (const cat of targetCategories) {
+        const count = await getCount(cat);
+        if (count > 0) {
+            summary.categories[cat] = count;
+            summary.totalElements += count;
+        }
+    }
+    console.log('[Viewer] Final Summary:', summary);
+    return summary;
+}

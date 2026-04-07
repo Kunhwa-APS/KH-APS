@@ -154,6 +154,13 @@ class FolderExplorer {
                 tr.onclick = (e) => {
                     // Prevent loading if clicking on the version badge
                     if (e.target.classList.contains('badge-version')) return;
+
+                    // ── [Fix] Set globals for version dropdown loading
+                    window.currentHubId = this.currentHubId;
+                    window.currentProjectId = this.currentProjectId;
+                    window.currentItemId = item.id;
+                    window.currentVersionId = item.id;
+
                     this.loadIntoViewer(item.urn, item.name);
                 };
 
@@ -209,7 +216,7 @@ class FolderExplorer {
                 toggleBtn.classList.toggle('active', this.isCompareMode);
                 toggleBtn.innerHTML = this.isCompareMode ? '<i class="fas fa-times"></i> 비교 취소' : '<i class="fas fa-columns"></i> 버전 비교';
                 if (this.currentVersions) {
-                    this.renderVersionTable(listBody, this.currentVersions, itemName);
+                    this.renderVersionTable(listBody, this.currentVersions, itemName, itemId);
                 }
             };
         }
@@ -221,14 +228,14 @@ class FolderExplorer {
             const versions = await response.json();
 
             this.currentVersions = versions;
-            this.renderVersionTable(listBody, versions, itemName);
+            this.renderVersionTable(listBody, versions, itemName, itemId);
         } catch (err) {
             console.error('[Explorer] Version fetch error:', err);
             listBody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--accent-red);">버전 정보를 가져올 수 없습니다.</td></tr>';
         }
     }
 
-    renderVersionTable(container, versions, itemName) {
+    renderVersionTable(container, versions, itemName, itemId) {
         container.innerHTML = '';
         versions.forEach(v => {
             const tr = document.createElement('tr');
@@ -294,7 +301,7 @@ class FolderExplorer {
                         if (this.compareSelection.length >= 2) return alert('이미 2개의 버전이 선택되었습니다.');
                         this.compareSelection.push(v.id);
                     }
-                    this.renderVersionTable(container, versions, itemName);
+                    this.renderVersionTable(container, versions, itemName, itemId);
 
                     if (this.compareSelection.length === 2) {
                         this.executeCompare(this.compareSelection[0], this.compareSelection[1]);
@@ -316,6 +323,13 @@ class FolderExplorer {
                         const { getSafeUrn } = await import('./viewer.js');
                         const finalUrn = getSafeUrn(decodedId);
                         console.log(`[FINAL ATTEMPT] 최종URN: ${finalUrn}`);
+
+                        // ── [Fix] Set globals for version dropdown loading
+                        window.currentHubId = this.currentHubId;
+                        window.currentProjectId = this.currentProjectId;
+                        window.currentItemId = itemId;
+                        window.currentVersionId = v.id;
+
                         this.loadVersionWithStatusCheck(finalUrn, `${itemName} (V${v.vNumber})`);
                     } catch (e) {
                         console.error('[Explorer] Failed to process URN:', e);
@@ -481,6 +495,16 @@ class FolderExplorer {
                 if (topBarName) topBarName.textContent = name;
 
                 console.log(`[Explorer] 모델 로드 완료: ${urn}`);
+
+                // ── [Fix] Populate top-bar version selector dropdown
+                if (window.currentHubId && window.currentProjectId && window.currentItemId) {
+                    try {
+                        const { loadVersionsDropdown } = await import('./version-manager.js');
+                        loadVersionsDropdown(window.currentHubId, window.currentProjectId, window.currentItemId, window.currentVersionId);
+                    } catch (e) {
+                        console.warn('[Explorer] Failed to load version dropdown:', e);
+                    }
+                }
 
                 // Trigger resize for layout adjustment
                 window.dispatchEvent(new Event('resize'));

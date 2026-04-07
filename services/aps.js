@@ -166,3 +166,39 @@ service.getItemVersions = async (projectId, itemId, accessToken) => {
     const resp = await dataManagementClient.getItemVersions(projectId, itemId, { accessToken });
     return resp.data;
 };
+
+// ───────────────────────────────────────────────
+// ACC Issues API (BIM 360 / ACC)
+// ───────────────────────────────────────────────
+
+/**
+ * 프로젝트의 Issue Container ID를 가져옵니다.
+ */
+service.getIssueContainerInfo = async (hubId, projectId, accessToken) => {
+    const response = await fetch(`https://developer.api.autodesk.com/project/v1/hubs/${hubId}/projects/${projectId}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to get project info: ${response.statusText}`);
+    }
+    const data = await response.json();
+    const issuesRel = data.data?.relationships?.issues;
+    if (issuesRel && issuesRel.data && issuesRel.data.id) {
+        return issuesRel.data.id;
+    }
+    return null;
+};
+
+/**
+ * Container ID를 사용하여 해당 프로젝트의 전체 이슈를 조회합니다.
+ */
+service.getProjectIssues = async (containerId, accessToken) => {
+    const response = await fetch(`https://developer.api.autodesk.com/issues/v1/containers/${containerId}/issues`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to get issues: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.results || data.data || [];
+};

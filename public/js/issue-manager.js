@@ -294,6 +294,7 @@ export class IssueManager {
         modal.dataset.thumbnail = thumbnail;
         modal.dataset.viewstate = JSON.stringify(viewstate);
         modal.dataset.urn = targetModelUrn;
+        modal.dataset.itemId = window.currentItemId || null;
 
         const previewContainer = document.getElementById('modal-image-preview');
         const previewImg = document.getElementById('issue-preview-img');
@@ -390,6 +391,7 @@ export class IssueManager {
             thumbnail,
             viewstate,
             modelUrn: this.viewer.model ? this.viewer.model.getData().urn : (urn || null),
+            itemId: data.itemId || window.currentItemId || null, // NEW: Cross-version key
             createdAt: new Date().toISOString(),
             resolution_description: resolutionDesc || null,
             after_snapshot_url: afterThumbnail || null,
@@ -397,7 +399,11 @@ export class IssueManager {
             // [Fix] Enforce normalized snake_case keys
             structure_name: structureName.toString().trim(),
             work_type: workType.toString().trim(),
-            issue_number: data.issueNumber || `REQ-${Date.now().toString().slice(-4)}`
+            issue_number: data.issueNumber || `REQ-${Date.now().toString().slice(-4)}`,
+            // [NEW] Metadata for UI Sync
+            hubId: window.currentHubId,
+            projectId: window.currentProjectId,
+            modelName: window.currentModelName
         };
 
         console.log('[AUDIT] New Issue Data Normalized:', issue);
@@ -495,6 +501,9 @@ export class IssueManager {
                 this.viewer.impl.clearOverlay('issue-markers');
             }
             this.pins = [];
+
+            // [수정] 버전(itemId) 필터링 제거: 모든 이슈의 핀을 표시
+            console.log(`[IssueManager] Restoring pins for all ${this.issues.length} issues.`);
             this.issues.forEach(issue => this.createPin(issue));
 
             console.log('[FIX] Sidebar & Overlay issues resolved.');
@@ -505,13 +514,24 @@ export class IssueManager {
         const container = document.getElementById('issue-list-container');
         if (!container) return;
 
+        // [수정] 버전 필터링 로직 제거 및 디버깅 로그 추가
+        console.log('--- [DEBUG] Issue Rendering Audit ---');
+        console.log('Total Issues in Memory:', this.issues.length);
+        console.log('Raw Data Array:', this.issues);
+
+        // 컨테이너 초기화
+        container.innerHTML = '';
+
         if (this.issues.length === 0) {
-            container.innerHTML = '<p class="issue-empty">No issues created yet. Click the Pin icon to add one.</p>';
+            container.innerHTML = '<p class="issue-empty">No issues found.</p>';
             return;
         }
 
-        container.innerHTML = this.issues.map(issue => `
-            <div class="issue-item" data-id="${issue.id}">
+        // 전체 렌더링 강제 (forEach 사용)
+        const htmlParts = [];
+        this.issues.forEach(issue => {
+            htmlParts.push(`
+            <div class="issue-item" data-id="${issue.id}" data-structure="${issue.structure_name || ''}">
                 <div class="issue-item-main">
                     <label style="display:flex;align-items:flex-start;padding-right:6px;margin-top:2px;cursor:pointer;" onclick="event.stopPropagation()">
                         <input type="checkbox" class="issue-check" data-id="${issue.id}"
@@ -536,7 +556,10 @@ export class IssueManager {
                     </div>
                 </div>
             </div>
-        `).join('');
+            `);
+        });
+
+        container.innerHTML = htmlParts.join('');
 
         // Bind checkbox events to update bulk button label
         container.querySelectorAll('.issue-check').forEach(chk => {
@@ -815,8 +838,22 @@ export class IssueManager {
     }
 
     async focusIssue(issue) {
-        // 1단계: 데이터 전수 수사 (Diagnostics)
-        console.log('--- ISSUE DATA AUDIT ---');
+        if (!issue || !issue.point) return;
+
+        console.log('[IssueManager] Focusing issue:', issue.id);
+
+        // 1. Restore Camera Viewstate (Requested Feature)
+        if (issue.viewstate) {
+            console.log('[IssueManager] Restoring camera state...');
+            this.viewer.restoreState(issue.viewstate);
+        } else {
+            // Fallback: zoom to point if no state saved
+            const target = new THREE.Vector3(issue.point.x, issue.point.y, issue.point.z);
+            this.viewer.navigation.setPivotPoint(target);
+            this.viewer.navigation.setRequestHomeView(true);
+        }
+
+        // 2. Select the clashing element if dbId exists
         console.log(JSON.stringify(issue, null, 2));
 
         // 2단계: 'URN 헌터' 로직 구현 (Robust Mapping)
@@ -838,58 +875,83 @@ export class IssueManager {
 
         // 실행 로직 분리 (필수)
         if (targetUrn !== currentUrn || !this.viewer.model) {
-            // [다른 모델인 경우] 또는 뷰어 모델이 없는 경우
-            console.log("모델이 다름! 모델 교체 시작...");
+            console.log("모델이 다름! 모델 교체 및 UI 동기화 시작...");
 
-            // 2단계: URN 누락 시 명확한 안내
             if (!targetUrn) {
-                console.error("[DEBUG] 데이터 누락: URN과 유사한 값이 하나도 없습니다.");
                 alert("이 이슈에는 연결된 모델 주소가 저장되지 않았습니다");
                 return;
             }
 
+            // [NEW] 1. 즉각적인 상단 제목 주입 (UI 배달 사고 방지)
+            let safeName = issue.modelName || issue.fileName;
+
+            // [FALLBACK] 만약 데이터가 없다면 사이드바에서 현재 활성화된 노드 텍스트 추출
+            if (!safeName || safeName === '{3D}' || safeName === 'undefined') {
+                const activeNode = document.querySelector('.tree-item.active .text');
+                if (activeNode) {
+                    safeName = activeNode.innerText;
+                    console.log('[IssueManager] Extracted name from sidebar fallback:', safeName);
+                } else {
+                    safeName = 'Loading Model...';
+                }
+            }
+
+            console.log('[DEBUG] FocusIssue - Passing to syncUIState:', { name: safeName, itemId: issue.itemId });
+
+            const topBarName = document.getElementById('viewer-model-name');
+            if (topBarName) topBarName.innerText = safeName;
+
+            // [NEW] 2. 중앙 상태 동기화
+            if (window.syncUIState) {
+                window.syncUIState(safeName, {
+                    urn: targetUrn,
+                    itemId: issue.itemId || issue.lineageUrn,
+                    hubId: issue.hubId,
+                    projectId: issue.projectId
+                });
+            }
+
             if (this.viewer.model) {
-                this.viewer.tearDown(); // 기존 모델 제거
+                this.viewer.tearDown();
                 this.viewer.setUp(this.viewer.config);
             }
 
             const { getSafeUrn, loadModel } = await import('./viewer.js');
-            const safeUrn = getSafeUrn(targetUrn); // 우리가 만든 정제 함수 사용
+            const safeUrn = getSafeUrn(targetUrn);
 
-            // 이벤트 동기화 (중요): 모델 로드가 시작되면 바로 카메라를 움직이지 않음
+            // 이벤트 동기화: 로드 완료 후 핀/카메라 복원 및 제목 최종 확정
             this.viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
-                // 모델이 화면에 다 나타난 직후에 이슈의 시점(viewerState) 복원
-                this.restorePins(); // 핀 복원 추가
+                this.restorePins();
                 this.viewer.restoreState(issueState);
+
+                // [NEW] 3. 로드 완료 후 제목 최종 싱크 (fallback 추출 보장)
+                if (window.syncUIState) {
+                    const postLoadName = issue.modelName || issue.fileName;
+                    window.syncUIState(postLoadName, {
+                        urn: targetUrn,
+                        itemId: issue.itemId || issue.lineageUrn
+                    });
+                }
             }, { once: true });
 
             try {
-                await loadModel(this.viewer, safeUrn); // 새 URN으로 모델 로드 시작
+                await loadModel(this.viewer, safeUrn);
 
-                // 3. issue-manager.js 연동 확인
                 if (window.syncTreeHighlight) {
-                    console.log(`[DEBUG] Tree Sync: Searching for ID ${targetUrn}`);
-                    const syncSuccess = window.syncTreeHighlight(targetUrn);
-                    if (syncSuccess) {
-                        console.log(`[DEBUG] Tree Sync: Success`);
-                    } else {
-                        console.log(`[DEBUG] Tree Sync: Failed (Node not found or tree not ready)`);
-                    }
+                    window.syncTreeHighlight(targetUrn);
                 }
             } catch (err) {
                 console.error("모델 로드 실패:", err);
                 alert("해당 이슈의 모델을 불러올 수 없습니다.");
-                // 실패 시 대시보드로 복구
-                const dashboard = document.getElementById('project-selection-dashboard');
-                if (dashboard) {
-                    dashboard.style.display = 'flex';
-                    document.getElementById('preview').style.display = 'none';
-                }
             }
         } else {
-            // [같은 모델인 경우]
             console.log("모델 동일! 시점만 이동...");
             this.viewer.restoreState(issueState);
+
+            // 동일 모델이라도 제목은 다시 한번 확인
+            if (window.syncUIState) {
+                window.syncUIState(issue.modelName || null, { urn: currentUrn, itemId: issue.itemId });
+            }
         }
     }
 
@@ -937,9 +999,6 @@ export class IssueManager {
 
     async exportToPdf(issuesArray, sf = {}) {
         const issuesList = Array.isArray(issuesArray) ? issuesArray : [issuesArray];
-
-        // [Diagnostic Alert] Removed as data pipeline is verified.
-
         const title = document.getElementById('pdf-export-title')?.value || '이슈 해결 결과 보고서';
         const logoFile = document.getElementById('pdf-export-logo')?.files?.[0];
 
@@ -949,60 +1008,74 @@ export class IssueManager {
             reader.readAsDataURL(logoFile);
         }) : '';
 
-        // [Fix] Extreme Normalization & Healing Strategy
+        // [Enrichment] 속성명 정규화
         const enrichedIssues = issuesList.map(issue => {
-            // Check every possible property name for structure/worktype
-            const sName = (issue.structure_name || issue.structureName || issue.structure || issue.struct || '-').toString().trim();
-            const wType = (issue.work_type || issue.workType || issue.work_type || issue.worktype || '-').toString().trim();
-
-            // Re-validate and fallback for "null" strings or empty
-            const finalSName = (sName === 'null' || sName === 'undefined' || !sName) ? '-' : sName;
-            const finalWType = (wType === 'null' || wType === 'undefined' || !wType) ? '-' : wType;
-
+            const sName = (issue.structure_name || issue.structureName || issue.structure || '-').toString().trim();
+            const wType = (issue.work_type || issue.workType || '-').toString().trim();
             return {
                 ...issue,
-                structure_name: finalSName,
-                work_type: finalWType
+                structure_name: (sName === 'null' || !sName) ? '-' : sName,
+                work_type: (wType === 'null' || !wType) ? '-' : wType
             };
         });
+
+        // ── [Reset 2] Data Payload Hard-Filter ───────────────────────────
+        const targetStructure = this.lastTargetStructure || null;
+        const targetWorkType = this.lastTargetWorkType || null; // [New] 공종 필터 추가
+        const targetStatus = this.lastTargetStatus || null;
+
+        // [Harness-Sync] 하네스에서 강제 주입된 필터링 데이터가 있으면 최우선 사용 (물리적 제거)
+        let finalIssues = this.forcePayloadIssues || enrichedIssues;
+
+        if (!this.forcePayloadIssues && (targetStructure || targetWorkType || targetStatus)) {
+            console.log(`[Nuclear-Reset] Hard-Filter 적용: 구조물="${targetStructure}", 공종="${targetWorkType}", 상태="${targetStatus}"`);
+            finalIssues = enrichedIssues.filter(item => {
+                let match = true;
+                if (targetStructure && !item.structure_name.includes(targetStructure)) match = false;
+                if (targetWorkType && !item.work_type.includes(targetWorkType)) match = false;
+                if (targetStatus && !item.status?.toLowerCase().includes(targetStatus.toLowerCase())) match = false;
+                return match;
+            });
+            console.log(`[Nuclear-Reset] 필터링 결과: ${enrichedIssues.length}개 -> ${finalIssues.length}개`);
+        }
+
+        // 초기화
+        this.lastTargetStructure = null;
+        this.lastTargetWorkType = null;
+        this.lastTargetStatus = null;
+        this.forcePayloadIssues = null;
+
+        // [Guardrail] 필터링 결과 유실 체크
+        if (finalIssues.length === 0) {
+            alert(`[오류] 해당 구조물(${targetStructure})의 데이터가 필터링 과정에서 유실되었습니다.`);
+            return;
+        }
 
         const payload = {
             title,
             logoBase64,
-            issues: enrichedIssues,
-            selectedFields: sf // Using consistent key expected by server
+            issues: finalIssues,
+            sf: sf,
+            issuesCount: finalIssues.length
         };
 
-        // [FINAL END-TO-END TRACE] CRITICAL: Check this in console!
-        if (enrichedIssues.length > 0) {
-            console.log('--- [PDF EXPORT DATA AUDIT] ---');
-            console.log('1. Object Keys:', Object.keys(enrichedIssues[0]));
-            console.log('2. Values Test:', {
-                structure_name: enrichedIssues[0].structure_name,
-                work_type: enrichedIssues[0].work_type
-            });
-            console.table(enrichedIssues.map(i => ({
-                id: i.id,
-                title: i.title,
-                struct: i.structure_name,
-                work: i.work_type
-            })));
-            console.log('--- [END AUDIT] ---');
-        }
-
-        const payloadString = JSON.stringify(payload);
-        const totalSizeMB = (payloadString.length / (1024 * 1024)).toFixed(2);
-
-        console.log(`[PDF Export] Final payload being sent to server. Total Size: ${totalSizeMB} MB`, {
-            issuesCount: enrichedIssues.length,
-            title
-        });
+        // ── [Audit Log] 최종 데이터 출력 ────────────────────────────────
+        console.log('--- [PDF EXPORT DATA AUDIT] ---');
+        console.log(`1. Target: ${targetStructure || '전체'}`);
+        console.log(`2. Count: ${finalIssues.length}`);
+        console.table(finalIssues.map(i => ({
+            id: i.id,
+            title: i.title,
+            struct: i.structure_name,
+            work: i.work_type
+        })));
+        console.log('--- [END AUDIT] ---');
 
         try {
             const resp = await fetch('/api/issues/export-pdf', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: payloadString
+                body: JSON.stringify(payload)
             });
 
             if (!resp.ok) {
@@ -1011,20 +1084,15 @@ export class IssueManager {
                 return;
             }
 
-            // Trigger file download
             const blob = await resp.blob();
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = issuesList.length === 1
-                ? `issue_report_${issuesList[0].id || 'export'}.pdf`
-                : `issue_report_batch_${Date.now()}.pdf`;
+            a.download = `issue_report_${Date.now()}.pdf`;
             document.body.appendChild(a);
             a.click();
             URL.revokeObjectURL(url);
             document.body.removeChild(a);
-
-            console.log('[IssueManager] PDF downloaded successfully.');
         } catch (err) {
             console.error('[IssueManager] PDF export failed:', err);
             alert('PDF 내보내기 중 오류가 발생했습니다: ' + err.message);

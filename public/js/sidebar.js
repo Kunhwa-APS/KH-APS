@@ -5,13 +5,19 @@
 import { openVersionModal } from './version-manager.js';
 
 window.findNodeById = function (nodes, id) {
-    // 1. nodes가 없거나 반복 불가능하면 즉시 종료 (안전장치)
     if (!nodes || (!Array.isArray(nodes) && typeof nodes[Symbol.iterator] !== 'function')) return null;
 
     for (let node of nodes) {
-        if (node.id === id || node.urn === id) return node;
+        // [ENHANCED] Search by ID, URN, or ItemID (and check partials for versioned IDs)
+        const isMatch = (
+            node.id === id ||
+            node.urn === id ||
+            (node.itemId && node.itemId === id) ||
+            (typeof node.id === 'string' && node.id.includes(id))
+        );
 
-        // 2. 자식 노드가 있는 경우에만 재귀 탐색
+        if (isMatch) return node;
+
         if (node.children && (Array.isArray(node.children) || typeof node.children[Symbol.iterator] === 'function')) {
             const found = window.findNodeById(node.children, id);
             if (found) return found;
@@ -21,6 +27,7 @@ window.findNodeById = function (nodes, id) {
 };
 
 let _treeInstance = null;
+window.urnToNameMap = {}; // [NEW] Global lookup for URN -> FileName
 
 async function getJSON(url) {
     const resp = await fetch(url);
@@ -55,6 +62,9 @@ async function getContents(hubId, projectId, region, folderId = null) {
         (folderId ? `?folder_id=${folderId}` : '');
     const contents = await getJSON(url);
     return contents.map(item => {
+        if (!item.folder && item.urn && item.name) {
+            window.urnToNameMap[item.urn] = item.name;
+        }
         if (item.folder) {
             return createTreeNode(
                 `folder|${hubId}|${projectId}|${region}|${item.id}`,
@@ -80,8 +90,15 @@ async function getVersions(hubId, projectId, region, itemId) {
     );
     return versions.map(version => {
         const vNum = (version.vNumber !== undefined && version.vNumber !== null) ? version.vNumber : '?';
+        const vUrn = Buffer.from(version.id).toString('base64').replace(/=/g, '');
         const displayText = `V${vNum} - ${version.displayName || version.name}`;
-        return createTreeNode(`version|${projectId}|${version.id}|${displayText}|${region}`, displayText, 'icon-version');
+
+        // Populate map for both full URN and base64 version
+        window.urnToNameMap[vUrn] = version.displayName || version.name;
+        if (version.id) window.urnToNameMap[version.id] = version.displayName || version.name;
+
+        // version|hubId|projectId|region|urn|name|itemId
+        return createTreeNode(`version|${hubId}|${projectId}|${region}|${vUrn}|${displayText}|${itemId}`, displayText, 'icon-version');
     });
 }
 

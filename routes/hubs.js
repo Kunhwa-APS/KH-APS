@@ -1,5 +1,5 @@
 const express = require('express');
-const { authRefreshMiddleware, getHubs, getProjects, getProjectContents, getItemVersions, getInternalTwoLeggedToken } = require('../services/aps.js');
+const { authRefreshMiddleware, getHubs, getProjects, getProjectContents, getItemVersions, getInternalTwoLeggedToken, getIssueContainerInfo, getProjectIssues } = require('../services/aps.js');
 
 let router = express.Router();
 
@@ -161,12 +161,19 @@ router.get('/api/hubs/:hub_id/projects/:project_id/contents', async function (re
  */
 router.get('/api/hubs/:hub_id/projects/:project_id/contents/:item_id/versions', async function (req, res, next) {
     try {
+        const rawItemId = req.params.item_id;
+        const projectId = req.params.project_id;
+        console.log(`[VERSIONS_FETCH] Request arrived - projectId: ${projectId}, rawItemId: ${rawItemId}`);
+
         const versions = await getItemVersions(
-            req.params.project_id,
-            req.params.item_id,
+            projectId,
+            rawItemId,
             req.internalOAuthToken.access_token
         );
-        res.json(versions.map(version => {
+
+        console.log(`[VERSIONS_FETCH_RESULT] Got ${versions.length} versions for itemId: ${rawItemId}`);
+
+        const result = versions.map(version => {
             let vNumber = version.attributes.versionNumber;
             if (vNumber === undefined || vNumber === null) {
                 const match = version.id.match(/[?&]version=(\d+)/i) || version.id.match(/:v(\d+)$/i);
@@ -180,8 +187,52 @@ router.get('/api/hubs/:hub_id/projects/:project_id/contents/:item_id/versions', 
                 createUserName: version.attributes.createUserName,
                 urn: Buffer.from(version.id).toString('base64').replace(/=/g, '')
             };
-        }));
+        });
+
+        console.log(`[VERSIONS_FETCH_RESULT] Sending ${result.length} processed versions, first:`, result[0]);
+        res.json(result);
     } catch (err) {
+        console.error('[VERSIONS_FETCH_ERROR]', err.message || err);
+        next(err);
+    }
+});
+
+/**
+ * [NEW] GET /api/hubs/:hub_id/projects/:project_id/issues
+ * 프로젝트 내 ACC Issues 목록 조회 (실시간)
+ */
+router.get('/api/hubs/:hub_id/projects/:project_id/issues', async function (req, res, next) {
+    try {
+        const hubId = req.params.hub_id;
+        const projectId = req.params.project_id;
+        const accessToken = req.internalOAuthToken.access_token;
+
+        console.log(`[ACC Issues API] Request arrived - hubId: ${hubId}, projectId: ${projectId}`);
+
+        const containerId = await getIssueContainerInfo(hubId, projectId, accessToken);
+
+        if (!containerId) {
+            console.log(`[ACC Issues API] No issue container found for ${projectId}`);
+            return res.json([]); // 빈 배열 반환 (에러 발생 방지)
+        }
+
+        const issues = await getProjectIssues(containerId, accessToken);
+        console.log(`[ACC Issues API] Successfully fetched ${issues.length} issues.`);
+
+        // API 호환성을 위해 IDBStorage 구조 혹은 공통 구조로 매핑
+        const formattedIssues = issues.map(i => ({
+            id: i.id,
+            title: i.title || i.attributes?.title || 'No Title',
+            status: i.attributes?.status || 'Open',
+            description: i.attributes?.description || '',
+            structure_name: i.attributes?.customAttributes?.find(attr => attr.title === 'Structure' || attr.title === '건물명')?.value || '-',
+            work_type: i.attributes?.customAttributes?.find(attr => attr.title === '공종' || attr.title === 'Work Type')?.value || '-',
+            raw: i // 디버깅용 원본
+        }));
+
+        res.json(formattedIssues);
+    } catch (err) {
+        console.error('[ACC Issues API] Error:', err.message || err);
         next(err);
     }
 });

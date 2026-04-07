@@ -1,13 +1,14 @@
 /* ============================================================
    main.js — Application Entry Point (ES6 Module)
    ============================================================ */
-import { initViewer, loadModel, loadModelWithTracking } from './viewer.js';
+import { initViewer, loadModel, loadModelWithTracking, getSafeUrn } from './viewer.js';
 import { initTree } from './sidebar.js';
 import { runDiff, visualizeDiff, loadVersions, exitCompareMode, showDiffList, addToolbarButton, addExitCompareButton } from './diff-viewer.js';
 // import { initLocalClash, closeClashPanel } from './clash-viewer.js';
 import { IssueManager } from './issue-manager.js';
 import { addCustomButtons } from './toolbar-utils.js';
 import { initMap, addProjectMarkers, flyToLocation, resizeMap } from './map.js';
+import { loadVersionsDropdown } from './version-manager.js?v=ver_20260330_1715';
 
 import { explorer } from './explorer.js';
 
@@ -30,6 +31,7 @@ let mapApiKey = null;
 window._issueManager = null;
 // window._handleClashToolClick = (viewer) => handleClashToolClick(viewer);
 window.loadModelWithTracking = loadModelWithTracking; // Expose globally
+window.currentModelName = ''; // Global tracker for active model name
 
 // ── [Data Recovery] ──
 // Restore IDs from localStorage on startup to prevent context loss
@@ -65,6 +67,21 @@ try {
             window._issueManager = issueManager;
             setupIssueModal();
             console.log('[Main] Viewer and IssueManager initialized');
+
+            // ── CRITICAL: Auto-populate version dropdown on model load ──
+            // This fires for ALL model loading paths (tree click, explorer, URN input, etc.)
+            currentViewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, async () => {
+                const hubId = window.currentHubId;
+                const projectId = window.currentProjectId;
+                const itemId = window.currentItemId;
+                const currentVersionId = window.currentVersionId;
+                console.log('[Main] GEOMETRY_LOADED - loading version dropdown with:', { hubId, projectId, itemId });
+                if (hubId && projectId && itemId) {
+                    await loadVersionsDropdown(hubId, projectId, itemId, currentVersionId);
+                } else {
+                    console.warn('[Main] GEOMETRY_LOADED - missing context, version dropdown not populated');
+                }
+            });
 
             // 2. Add Toolbar Buttons (Event-Driven)
             currentViewer.addEventListener(Autodesk.Viewing.TOOLBAR_CREATED_EVENT, () => {
@@ -246,6 +263,12 @@ function renderProjectRows(projects) {
             localStorage.setItem('aps_last_hub_id', project.hubId);
             localStorage.setItem('aps_last_project_id', project.id);
 
+            // [Optimization] проекта가 선택되면 뷰어 로드 전에도 즉시 이슈 분석(API Fetch) 가동
+            if (window.ContextHarness) {
+                console.log('[Dashboard] 프로젝트 선택됨. 백그라운드 이슈 수합(Aggregation) 시작');
+                window.ContextHarness.extract(null);
+            }
+
             // Transition to Explorer mode
             if (window.explorer) {
                 window.explorer.switchMode('explorer');
@@ -291,12 +314,21 @@ async function handleTreeSelection(node) {
     }
 
     if (type === 'version' || type === 'item') {
-        const urn = (type === 'version') ? tokens[2] : node.urn;
-        const versionName = (type === 'version') ? tokens[3] : (node.text + ` (V${node.vNumber})`);
+        const urn = (type === 'version') ? tokens[4] : node.urn;
+        const versionName = (type === 'version') ? tokens[5] : (node.text + ` (V${node.vNumber})`);
 
         if (!urn) return;
 
         console.log(`[Main] Loading ${type}: ${versionName} | URN: ${urn}`);
+
+        // ── Set context BEFORE load so GEOMETRY_LOADED_EVENT has correct data ──
+        if (type === 'item') {
+            window.currentItemId = tokens[4];
+            window.currentVersionId = node.id;
+        } else if (type === 'version' && tokens[6]) {
+            window.currentItemId = tokens[6];
+            window.currentVersionId = tokens[4]; // urn/versionId
+        }
 
         // Ensure we switch to viewer mode if we are in explorer mode
         explorer.switchMode('viewer');
@@ -310,6 +342,9 @@ async function handleTreeSelection(node) {
 
                 // ── Context 저장 (툴바 버전 버튼 등에서 활용) ──
                 if (type === 'item') {
+                    window.currentItemId = tokens[4]; // Store for cross-version issue management
+                    loadVersionsDropdown(tokens[1], tokens[2], tokens[4], node.id);
+
                     window._saveModelContext(urn, {
                         hubId: tokens[1],
                         projectId: tokens[2],
@@ -317,6 +352,13 @@ async function handleTreeSelection(node) {
                         itemId: tokens[4],
                         itemName: node.text.trim()
                     });
+                } else if (type === 'version') {
+                    // version|hubId|projectId|region|urn|name|itemId
+                    // itemId is now tokens[6]
+                    if (tokens[6]) {
+                        window.currentItemId = tokens[6];
+                        loadVersionsDropdown(tokens[1], tokens[2], tokens[6], tokens[4]); // tokens[4] is the urn/versionId
+                    }
                 }
             });
         }
@@ -608,6 +650,7 @@ function setupIssueModal() {
         const afterThumbnail = modal.dataset.afterThumbnail || null;
         const afterViewstate = modal.dataset.afterViewstate ? JSON.parse(modal.dataset.afterViewstate) : null;
         const issueNumber = modal.dataset.issueNumber || `ISSUE-${Date.now()}`;
+        const itemId = modal.dataset.itemId || null;
 
         // Skip validation check closing by returning early if invalid
         if (!title || !desc) {
@@ -660,7 +703,8 @@ function setupIssueModal() {
                     point,
                     thumbnail,
                     viewstate,
-                    urn
+                    urn,
+                    itemId
                 };
                 console.log('[Main] addIssue with full data:', fullIssueData);
                 issueManager.addIssue(fullIssueData);
@@ -852,3 +896,178 @@ async function loadHubsOnMap() {
         console.warn('Map hub load error:', err.message);
     }
 }
+
+/**
+ * ── Centralized UI Sync Utility ──
+ * Updates titles and triggers version dropdown refresh consistently.
+ */
+/**
+ * ── Robust UI Sync Architecture ──
+ * Addressing race conditions and Revit title extraction issues.
+ */
+
+// 1. URN Normalization Utility
+window.normalizeUrn = (urn) => {
+    if (!urn) return null;
+    let decoded = urn;
+    try { decoded = decodeURIComponent(urn); } catch (e) { }
+    if (decoded.includes('dm.lineage:')) return decoded.split('?')[0];
+    return decoded;
+};
+
+// 2. Sidebar MutationObserver (Immediate Feedback)
+const sidebarObserver = new MutationObserver(() => {
+    const activeNode = document.querySelector('.tree-item.active .text');
+    if (activeNode && activeNode.innerText && activeNode.innerText !== window.currentModelName) {
+        console.log('[Sync] Observer detected active node:', activeNode.innerText);
+        const titleElements = ['viewer-model-name', 'model-title'];
+        titleElements.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerText = activeNode.innerText;
+        });
+        window.currentModelName = activeNode.innerText;
+    }
+});
+
+// Start observing sidebar when available
+const startSidebarObservation = () => {
+    const container = document.getElementById('hub-tree-container') || document.querySelector('.inspire-tree');
+    if (container) {
+        sidebarObserver.observe(container, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+        console.log('[Sync] Sidebar MutationObserver started.');
+    } else {
+        setTimeout(startSidebarObservation, 1500);
+    }
+};
+startSidebarObservation();
+
+// 3. Async Name Extraction Worker (Addressing Race Conditions)
+window.retryExtractName = async (context, maxRetries = 10) => {
+    console.log('[SyncWorker] Started for URN:', context.urn);
+
+    for (let i = 0; i < maxRetries; i++) {
+        const viewer = window._viewer || (typeof NOP_VIEWER !== 'undefined' ? NOP_VIEWER : null);
+        let foundName = null;
+
+        // A. Check Viewer Metadata (Most Reliable)
+        if (viewer && viewer.model) {
+            const model = viewer.model;
+            const modelData = model.getData();
+
+            // [Fix] getDocument().getProperty() 제거 및 최신 API 표준 반영
+            foundName = modelData.loadOptions?.bubbleNode?.name?.() ||
+                model.getDocumentNode()?.data?.name ||
+                modelData.metadata?.name;
+
+            if (foundName && !['{3D}', 'Scene', 'undefined', 'Loading...'].includes(String(foundName).trim())) {
+                console.log(`[SyncWorker] Viewer API에서 모델명 추출 성공 (Attempt ${i + 1}):`, foundName);
+                return foundName;
+            }
+        }
+
+        // B. Check Sidebar DOM (Active Item)
+        const activeNode = document.querySelector('.tree-item.active .text');
+        if (activeNode && activeNode.innerText && !['{3D}', 'Loading...'].includes(activeNode.innerText)) {
+            console.log(`[SyncWorker] Found in Sidebar DOM (Attempt ${i + 1}):`, activeNode.innerText);
+            return activeNode.innerText;
+        }
+
+        // C. Check Global Map (From Sidebar Loading)
+        if (context.urn && window.urnToNameMap && window.urnToNameMap[context.urn]) {
+            console.log(`[SyncWorker] Found in Global Map (Attempt ${i + 1}):`, window.urnToNameMap[context.urn]);
+            return window.urnToNameMap[context.urn];
+        }
+
+        await new Promise(r => setTimeout(r, 600));
+    }
+
+    console.warn('[SyncWorker] Failed to resolve name after retries.');
+    return null;
+};
+
+// 4. Central Orchestrator
+window.syncUIState = async (name, context = {}) => {
+    console.log('[Main] DISPATCH_SYNC:', { name, context });
+
+    // Immediate injection if name provided
+    let initialName = (name && !['undefined', '{3D}'].includes(String(name))) ? name : null;
+
+    const updateUI = (finalName) => {
+        if (!finalName) return;
+        const titleElements = ['viewer-model-name', 'model-title', 'model-name-label'];
+        titleElements.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerText = finalName;
+        });
+        window.currentModelName = finalName;
+    };
+
+    if (initialName) updateUI(initialName);
+
+    // Context persistence
+    if (context.urn) window.currentUrn = context.urn;
+    if (context.itemId) window.currentItemId = context.itemId;
+    if (context.hubId) window.currentHubId = context.hubId;
+    if (context.projectId) window.currentProjectId = context.projectId;
+
+    // Trigger Version Manager
+    if (window.VersionManager && (context.itemId || window.currentItemId)) {
+        window.VersionManager.init({
+            hubId: context.hubId || window.currentHubId,
+            projectId: context.projectId || window.currentProjectId,
+            itemId: context.itemId || window.currentItemId,
+            currentVersionId: context.urn || window.currentUrn
+        });
+    }
+
+    // Launch Async Worker for final resolution
+    const refinedName = await window.retryExtractName(context);
+    if (refinedName) updateUI(refinedName);
+
+    // [Harness-Architecture] 추출된 데이터를 컨텍스트 하네스에 최종 주입
+    if (window.ContextHarness) {
+        const viewer = window._viewer || (typeof NOP_VIEWER !== 'undefined' ? NOP_VIEWER : null);
+        if (viewer && viewer.model) {
+            console.log('[Main] SyncUIState -> ContextHarness.extract 트리거');
+            window.ContextHarness.extract(viewer);
+        }
+    }
+};
+
+
+// ── Initial State via URL Parameter ────────────────────────
+window.addEventListener('load', async () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlUrn = urlParams.get('urn');
+
+    if (urlUrn) {
+        console.log('[Main] Initializing with URN from URL:', urlUrn);
+
+        // Wait for viewer initialization
+        const checkViewer = setInterval(async () => {
+            if (window._viewer && window._viewer.model === undefined) { // Check if viewer ready but no model yet
+                clearInterval(checkViewer);
+
+                // Switch to viewer mode
+                const dashboard = document.getElementById('project-selection-dashboard');
+                const explorerCont = document.getElementById('explorer-container');
+                if (dashboard) dashboard.style.display = 'none';
+                if (explorerCont) explorerCont.style.display = 'none';
+                document.getElementById('viewer-top-bar').style.display = 'flex';
+                document.getElementById('preview').style.display = 'block';
+                document.getElementById('viewer-info-bar').style.display = 'flex';
+
+                try {
+                    const { loadModelWithTracking } = await import('./viewer.js');
+                    await loadModelWithTracking(window._viewer, urlUrn, 'Loaded from URL');
+                    window.currentUrn = urlUrn;
+                } catch (err) {
+                    console.error('[Main] Failed to load initial URN:', err);
+                }
+            } else if (window._viewer && window._viewer.model !== undefined) {
+                // Model already loading/loaded, just stop check
+                clearInterval(checkViewer);
+            }
+        }, 500);
+    }
+});

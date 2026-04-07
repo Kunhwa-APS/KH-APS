@@ -21,41 +21,44 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         // [Field Selector] Build field visibility flags — use data.selectedFields if available, fallback to data.sf
         const rawSf = data.selectedFields || data.sf || {};
         const sf = {
-            no: rawSf.no !== false,
-            structure: rawSf.structure !== false,
-            work_type: rawSf.work_type !== false || rawSf.workType !== false,
-            description: rawSf.description !== false,
-            resolution: rawSf.resolution !== false,
-            screenshot: rawSf.screenshot !== false || rawSf.images !== false
+            no: rawSf.no !== false && String(rawSf.no) !== 'false',
+            structure: rawSf.structure !== false && String(rawSf.structure) !== 'false',
+            work_type: rawSf.work_type !== false && String(rawSf.work_type) !== 'false',
+            description: rawSf.description !== false && String(rawSf.description) !== 'false',
+            resolution: rawSf.resolution !== false && String(rawSf.resolution) !== 'false',
+            screenshot: rawSf.screenshot !== false && String(rawSf.screenshot) !== 'false'
         };
+
+        // [Crucial Debug] Write to a file since terminal logs might be missed
+        try {
+            const debugPayload = { timestamp: new Date().toISOString(), sf, issuesCount: issuesRaw.length, titleLength: title.length, hasLogo: !!logoBase64 };
+            fs.writeFileSync(path.join(__dirname, '..', 'pdf_debug.log'), JSON.stringify(debugPayload, null, 2));
+        } catch (e) {
+            console.error('DEBUG_LOG_WRITE_FAILED:', e.message);
+        }
+
+        // [Debug] Log basic request info
+        console.log(`[Issues PDF] Exporting ${issuesRaw.length} issues. Title: ${title}`);
 
         // Pre-compute combined flag for use in HBS
         sf.hasMetaRow = sf.no || sf.structure || sf.work_type;
 
-        // Calculate colspan for Description/Resolution rows: (No:2 + Struct:2 + Work:2)
-        let totalCols = 0;
-        if (sf.no) totalCols += 2;
-        if (sf.structure) totalCols += 2;
-        if (sf.work_type) totalCols += 2;
-        sf.colspan = Math.max(1, totalCols - 1);
-        sf.totalCols = Math.max(1, totalCols);
-        sf.halfCols = Math.max(1, Math.floor(totalCols / 2));
+        // Calculate layout properties for the single-table approach
+        let totalColsCount = 0;
+        if (sf.no) totalColsCount += 2;
+        if (sf.structure) totalColsCount += 2;
+        if (sf.work_type) totalColsCount += 2;
+
+        sf.colspan = Math.max(1, totalColsCount - 1);
+        sf.totalCols = Math.max(1, totalColsCount);
+        sf.halfCols = Math.max(1, Math.floor(totalColsCount / 2));
 
         console.log('[Issues PDF] selectedFields:', sf);
 
         // Map each raw issue to the template fields
-        // status is passed as-is so {{#if (eq status "Closed")}} works in HBS
         const issues = issuesRaw.map((issue, idx) => {
-            // [Greedy Extraction Strategy] — Use unique, unambiguous keys
-            const rawStruct = (issue.structure_name || issue.structureName || issue.structure || issue.struct || issue.Structure || '').toString().trim();
-            const rawWork = (issue.work_type || issue.workType || issue.work_Type || issue.worktype || issue.WorkType || '').toString().trim();
-
-            const finalStruct = rawStruct || '-';
-            const finalWork = rawWork || '-';
-
-            const rawKeys = Object.keys(issue || {}).join(', ');
-            const valStruct = (issue.structure_name || issue.structureName || '').toString().trim();
-            const valWork = (issue.work_type || issue.workType || '').toString().trim();
+            const valStruct = (issue.structure_name || issue.structureName || issue.structure || '-').toString().trim();
+            const valWork = (issue.work_type || issue.workType || issue.workType || '-').toString().trim();
             const valIssueNum = (issue.issue_number || issue.issueNumber || issue.dbId || issue.id || (idx + 1)).toString().trim();
 
             return {
@@ -76,9 +79,9 @@ router.post('/api/issues/export-pdf', async (req, res) => {
 
         const templateHtml = fs.readFileSync(templatePath, 'utf8');
         const template = handlebars.compile(templateHtml);
-        const html = template({ title, logoBase64, issues, sf });
+        const html = template(templateData);
 
-        // 3. Launch Puppeteer with generous timeout for many images
+        // 3. Launch Puppeteer with generous timeout
         const browser = await puppeteer.launch({
             headless: 'new',
             args: ['--no-sandbox', '--disable-setuid-sandbox'],
