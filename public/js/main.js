@@ -252,7 +252,7 @@ function renderProjectRows(projects) {
             <td>${createdDate}</td>
         `;
 
-        row.onclick = () => {
+        row.onclick = async () => {
             console.log('[Dashboard] Project selected:', project.name);
             const dashboard = document.getElementById('project-selection-dashboard');
             if (dashboard) dashboard.style.display = 'none';
@@ -272,6 +272,24 @@ function renderProjectRows(projects) {
             // Transition to Explorer mode
             if (window.explorer) {
                 window.explorer.switchMode('explorer');
+
+                try {
+                    // [Feature] Automatically find and enter 'Project Files' folder
+                    const resp = await fetch(`/api/hubs/${project.hubId}/projects/${project.id}/contents`);
+                    if (resp.ok) {
+                        const items = await resp.json();
+                        const projectFiles = items.find(i => i.folder && i.name.toLowerCase().includes('project files'));
+                        if (projectFiles) {
+                            console.log('[Dashboard] Auto-navigating to Project Files:', projectFiles.id);
+                            window.explorer.showFolder(project.hubId, project.id, projectFiles.id, projectFiles.name);
+                            return;
+                        }
+                    }
+                } catch (err) {
+                    console.warn('[Dashboard] Failed to auto-locate Project Files, falling back to root:', err);
+                }
+
+                // Fallback to root (Top Folders)
                 window.explorer.showFolder(project.hubId, project.id, null, project.name);
             }
         };
@@ -590,31 +608,29 @@ function setupIssueModal() {
         });
     }
 
-    // Capture After Snapshot Logic
+    // Capture After Snapshot Logic (Integrates Markup Tools)
     const captureAfterBtn = document.getElementById('issue-capture-after-btn');
     if (captureAfterBtn) {
         captureAfterBtn.onclick = () => {
             if (issueManager) {
-                // Instantly capture state
+                // 1. Instantly capture viewpoint state
                 const afterViewstate = issueManager.viewer.getState();
                 modal.dataset.afterViewstate = JSON.stringify(afterViewstate);
 
-                // Show loading state on button
-                const originalText = captureAfterBtn.innerHTML;
-                captureAfterBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Capturing...';
+                // 2. Temporarily hide modal to allow drawing on viewer
+                modal.style.display = 'none';
 
-                issueManager.captureIssueThumbnail((base64) => {
-                    captureAfterBtn.innerHTML = originalText;
-                    if (base64) {
-                        modal.dataset.afterThumbnail = base64;
-                        const afterPreviewImg = document.getElementById('issue-after-preview-img');
-                        const afterPreviewContainer = document.getElementById('modal-after-image-preview');
-                        if (afterPreviewImg && afterPreviewContainer) {
-                            afterPreviewImg.src = base64;
-                            afterPreviewContainer.style.display = 'flex';
-                        }
-                    }
-                });
+                // 3. Find current issue context for markup extension
+                const editId = parseInt(modal.dataset.editId);
+                const issue = issueManager.issues.find(i => i.id === editId);
+
+                // 4. Trigger Markup Mode with 'resolve' context
+                console.log('[Main] Triggering resolution markup Mode for issue:', editId);
+                issueManager.enterMarkupMode(
+                    issue ? issue.dbId : 0,
+                    issue ? issue.point : null,
+                    'resolve'
+                );
             }
         };
     }

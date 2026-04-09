@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>APS AI Platform - Login</title>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+            text-align: center;
+        }
+
+        .loader {
+            border: 4px solid #1e293b;
+            border-top: 4px solid #6366f1;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+    </style>
+    <script>
+        window.onload = () => {
+            setTimeout(() => {
+                window.location.href = '/api/auth/login';
+            }, 500);
+        };
+    </script>
+</head>
+
+<body>
+    <div>
+        <div class="loader"></div>
+        <p>Autodesk 계정으로 로그인을 준비 중입니다...</p>
+    </div>
+</body>
+
+</html>

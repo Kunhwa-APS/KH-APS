@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="APS AI Platform - ACC Hubs Browser with Google Maps">
+    <link rel="icon" type="image/x-icon" href="https://cdn.autodesk.io/favicon.ico">
+    <!-- Autodesk Viewer -->
+    <link rel="stylesheet" href="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/style.css">
+    <!-- InspireTree -->
+    <link rel="stylesheet" href="https://unpkg.com/inspire-tree-dom@4.0.6/dist/inspire-tree-light.min.css">
+    <!-- Cesium (VWorld 3D Map) -->
+    <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css">
+    <!-- App CSS -->
+    <link rel="stylesheet" href="/main.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <title>APS AI Platform - Hubs Browser</title>
+</head>
+<body>
+    <!-- Header -->
+    <div id="header">
+        <img class="logo" src="https://cdn.autodesk.io/logo/black/stacked.png" alt="Autodesk Platform Services">
+        <span class="title">APS AI Platform - Hubs Browser</span>
+        <div class="tab-group">
+            <button class="tab-btn active" id="tab-viewer" onclick="switchTab('viewer')">🏗️ Viewer</button>
+            <button class="tab-btn" id="tab-map" onclick="switchTab('map')">🗺️ Map</button>
+        </div>
+        <button id="login" style="visibility: hidden;">Login</button>
+    </div>
+
+    <!-- Sidebar -->
+    <div id="sidebar">
+        <div id="tree"></div>
+    </div>
+
+    <!-- Viewer Panel -->
+    <div id="preview"></div>
+
+    <!-- Map Panel -->
+    <div id="map-container" style="display:none;"></div>
+
+    <!-- Scripts -->
+    <script src="https://developer.api.autodesk.com/modelderivative/v2/viewers/7.*/viewer3D.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+    <script src="https://unpkg.com/inspire-tree@4.3.1/dist/inspire-tree.js"></script>
+    <script src="https://unpkg.com/inspire-tree-dom@4.0.6/dist/inspire-tree-dom.min.js"></script>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
+
+    <script>
+        function switchTab(tab) {
+            document.getElementById('tab-viewer').classList.toggle('active', tab === 'viewer');
+            document.getElementById('tab-map').classList.toggle('active', tab === 'map');
+            document.getElementById('preview').style.display = tab === 'viewer' ? 'block' : 'none';
+            document.getElementById('map-container').style.display = tab === 'map' ? 'block' : 'none';
+            if (tab === 'map') {
+                setTimeout(() => { if (window._resizeMap) window._resizeMap(); }, 150);
+            }
+        }
+    </script>
+    <script src="/main.js" type="module"></script>
+</body>
+</html>

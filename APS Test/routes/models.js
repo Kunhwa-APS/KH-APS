@@ -1,92 +1,76 @@
-'use strict';
-
 const express = require('express');
-const router = express.Router();
-const {
-    getHubs,
-    getProjects,
-    getProjectContents,
-    getItemVersions,
-    authRefreshMiddleware
-} = require('../services/aps');
+const formidable = require('express-formidable');
+const { listObjects, uploadObject, translateObject, getManifest, urnify } = require('../services/aps.js');
 
-// ── GET /api/models/hubs ─────────────────────────────────────────────────────
-router.get('/hubs', authRefreshMiddleware, async (req, res, next) => {
+let router = express.Router();
+
+/**
+ * GET /api/models
+ * 뷰어에서 볼 수 있는 모든 모델 목록 반환
+ */
+router.get('/api/models', async function (req, res, next) {
     try {
-        const hubs = await getHubs(req.internalOAuthToken.access_token);
-        res.json(hubs.map(h => ({
-            id: h.id,
-            name: h.attributes?.name,
-            region: h.attributes?.region,
-            type: h.attributes?.extension?.type
+        const objects = await listObjects();
+        res.json(objects.map(o => ({
+            name: o.objectKey,
+            urn: urnify(o.objectId)
         })));
     } catch (err) {
-        console.error('[Models] getHubs error:', err.message);
-        next({ status: 500, message: err.message });
+        next(err);
     }
 });
 
-// ── GET /api/models/hubs/:hubId/projects ─────────────────────────────────────
-router.get('/hubs/:hubId/projects', authRefreshMiddleware, async (req, res, next) => {
+/**
+ * GET /api/models/:urn/status
+ * 모델 변환 상태 확인
+ */
+router.get('/api/models/:urn/status', async function (req, res, next) {
     try {
-        const projects = await getProjects(req.params.hubId, req.internalOAuthToken.access_token);
-        res.json(projects.map(p => ({
-            id: p.id,
-            name: p.attributes?.name,
-            type: p.attributes?.extension?.type
-        })));
+        const manifest = await getManifest(req.params.urn);
+        if (manifest) {
+            let messages = [];
+            if (manifest.derivatives) {
+                for (const derivative of manifest.derivatives) {
+                    messages = messages.concat(derivative.messages || []);
+                    if (derivative.children) {
+                        for (const child of derivative.children) {
+                            messages = messages.concat(child.messages || []);
+                        }
+                    }
+                }
+            }
+            res.json({
+                status: manifest.status,
+                progress: manifest.progress,
+                messages
+            });
+        } else {
+            res.json({ status: 'n/a' });
+        }
     } catch (err) {
-        console.error('[Models] getProjects error:', err.message);
-        next({ status: 500, message: err.message });
+        next(err);
     }
 });
 
-// ── GET /api/models/hubs/:hubId/projects/:projectId/contents ─────────────────
-// Optional query: ?folderId=...
-router.get('/hubs/:hubId/projects/:projectId/contents', authRefreshMiddleware, async (req, res, next) => {
-    try {
-        const { folderId } = req.query;
-        const items = await getProjectContents(
-            req.params.hubId,
-            req.params.projectId,
-            folderId,
-            req.internalOAuthToken.access_token
-        );
-        res.json(items.map(i => ({
-            id: i.id,
-            name: i.attributes?.displayName || i.attributes?.name,
-            type: i.type,           // 'folders' or 'items'
-            extension: i.attributes?.extension?.type,
-            urn: i.type === 'items' && i.relationships?.tip?.data?.id
-                ? Buffer.from(i.relationships.tip.data.id).toString('base64').replace(/=/g, '')
-                : null
-        })));
-    } catch (err) {
-        console.error('[Models] getProjectContents error:', err.message);
-        next({ status: 500, message: err.message });
+/**
+ * POST /api/models
+ * 새 모델 파일 업로드 및 변환 시작
+ */
+router.post('/api/models', formidable({ maxFileSize: Infinity }), async function (req, res, next) {
+    const file = req.files['model-file'];
+    if (!file) {
+        res.status(400).send('The required field ("model-file") is missing.');
+        return;
     }
-});
-
-// ── GET /api/models/.../items/:itemId/versions ────────────────────────────────
-router.get('/hubs/:hubId/projects/:projectId/items/:itemId/versions', authRefreshMiddleware, async (req, res, next) => {
     try {
-        const versions = await getItemVersions(
-            req.params.projectId,
-            req.params.itemId,
-            req.internalOAuthToken.access_token
-        );
-        res.json(versions.map(v => ({
-            id: v.id,
-            name: v.attributes?.displayName || v.attributes?.name,
-            createTime: v.attributes?.createTime,
-            createUserName: v.attributes?.createUserName,
-            urn: v.relationships?.derivatives?.data?.id
-                ? Buffer.from(v.relationships.derivatives.data.id).toString('base64').replace(/=/g, '')
-                : null
-        })));
+        const obj = await uploadObject(file.name, file.path);
+        await translateObject(urnify(obj.objectId), req.fields['model-zip-entrypoint']);
+        res.json({
+            name: obj.objectKey,
+            urn: urnify(obj.objectId)
+        });
     } catch (err) {
-        console.error('[Models] getItemVersions error:', err.message);
-        next({ status: 500, message: err.message });
+        next(err);
     }
 });
 

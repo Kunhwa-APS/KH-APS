@@ -4,10 +4,19 @@
  */
 
 import { initViewer, loadModel } from './viewer.js';
+import { addCustomButtons } from './toolbar-utils.js';
 
 let viewers = []; // [viewers[0]: Old, viewers[1]: New]
+export function setCompareViewers(vA, vB) {
+    viewers = [vA, vB];
+}
+export function getCompareViewers() {
+    return viewers;
+}
+
 let currentDiffData = null;
 let isSyncing = false;
+let rAF = null;
 
 // Revit elements to exclude from diff (centerlines, axes, separators, etc.)
 const REVIT_EXCLUDE_KEYWORDS = [
@@ -28,6 +37,103 @@ const COLORS = {
     changed: new THREE.Vector4(1, 1, 0, 0.7),  // Yellow
     ghost: new THREE.Vector4(0.5, 0.5, 0.5, 0.1) // Subtle Transparent Grey
 };
+
+// ── Camera Sync Event Listeners Storage ─────────────────────────────
+const syncHandlers = new Map();
+
+/**
+ * Initializes synchronized camera movement between two viewers.
+ * @param {Autodesk.Viewing.GuiViewer3D} vA 
+ * @param {Autodesk.Viewing.GuiViewer3D} vB 
+ */
+export function initCameraSync(vA, vB) {
+    if (!vA || !vB) return;
+
+    // Clean up any existing listeners first to be safe
+    cleanupCameraSync(vA, vB);
+
+    let activeMaster = null;
+    let lastPos = { x: 0, y: 0, z: 0 };
+    let lastTgt = { x: 0, y: 0, z: 0 };
+
+    const onCameraChange = (src, dst, label) => {
+        if (isSyncing) return;
+        if (src !== activeMaster) return;
+
+        const nav = src.navigation;
+        const pos = nav.getPosition();
+        const tgt = nav.getTarget();
+
+        // 0.0001 Threshold Check
+        const dP = Math.abs(pos.x - lastPos.x) + Math.abs(pos.y - lastPos.y) + Math.abs(pos.z - lastPos.z);
+        const dT = Math.abs(tgt.x - lastTgt.x) + Math.abs(tgt.y - lastTgt.y) + Math.abs(tgt.z - lastTgt.z);
+
+        if (dP < 0.0001 && dT < 0.0001) return;
+
+        // Sync using requestAnimationFrame
+        if (rAF) cancelAnimationFrame(rAF);
+        rAF = requestAnimationFrame(() => {
+            isSyncing = true;
+            try {
+                lastPos = { x: pos.x, y: pos.y, z: pos.z };
+                lastTgt = { x: tgt.x, y: tgt.y, z: tgt.z };
+
+                // Use a safe way to get/set UpVector across different Viewer versions
+                const up = (typeof nav.getUpVector === 'function')
+                    ? nav.getUpVector()
+                    : (typeof nav.getCameraUpVector === 'function' ? nav.getCameraUpVector() : { x: 0, y: 0, z: 1 });
+
+                dst.navigation.setView(pos, tgt);
+                if (dst.navigation.setUpVector) {
+                    dst.navigation.setUpVector(up);
+                }
+                dst.impl.invalidate(true);
+            } catch (e) {
+                console.warn(`[CameraSync] ${label} error:`, e.message);
+            } finally {
+                // Reset lock in a tiny delay to ensure setView events are swallowed
+                setTimeout(() => { isSyncing = false; }, 0);
+                rAF = null;
+            }
+        });
+    };
+
+    const hA = () => onCameraChange(vA, vB, 'A→B');
+    const hB = () => onCameraChange(vB, vA, 'B→A');
+
+    const mEnterA = () => { activeMaster = vA; };
+    const mEnterB = () => { activeMaster = vB; };
+
+    // Store for cleanup
+    syncHandlers.set(vA, { camera: hA, enter: mEnterA });
+    syncHandlers.set(vB, { camera: hB, enter: mEnterB });
+
+    vA.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, hA);
+    vB.addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, hB);
+    vA.container.addEventListener('mouseenter', mEnterA);
+    vB.container.addEventListener('mouseenter', mEnterB);
+
+    console.log('[CameraSync] Initialized Event-Lock for Split Viewers');
+}
+
+/**
+ * Removes all synchronization listeners from the viewers.
+ */
+export function cleanupCameraSync(vA, vB) {
+    [vA, vB].forEach(v => {
+        if (!v) return;
+        const h = syncHandlers.get(v);
+        if (h) {
+            v.removeEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, h.camera);
+            if (v.container) v.container.removeEventListener('mouseenter', h.enter);
+            syncHandlers.delete(v);
+        }
+    });
+    isSyncing = false;
+    if (rAF) cancelAnimationFrame(rAF);
+    rAF = null;
+    console.log('[CameraSync] Cleanup complete');
+}
 
 /**
  * Adds a comparison button to the viewer toolbar.
@@ -54,48 +160,62 @@ export function addToolbarButton(viewer, onClick) {
  */
 export async function initSplitViewers() {
     if (viewers.length === 0) {
-        const vA = await initViewer(document.getElementById('preview-a'));
-        const vB = await initViewer(document.getElementById('preview-b'));
+        // [중요] 실제 index.html의 ID인 viewer-left, viewer-right를 사용해야 함
+        const vA = await initViewer(document.getElementById('viewer-left'));
+        const vB = await initViewer(document.getElementById('viewer-right'));
         viewers = [vA, vB];
 
-        // ── Load ViewCube extension explicitly on both viewers ────────────────
-        await Promise.all([
-            loadViewCubeExtension(viewers[0], 'ViewerA'),
-            loadViewCubeExtension(viewers[1], 'ViewerB'),
-        ]);
+        // ── Load Buttons & ViewCube ──────────────────────────────────────────
+        [vA, vB].forEach((v, idx) => {
+            v.addEventListener(Autodesk.Viewing.TOOLBAR_CREATED_EVENT, () => {
+                addCustomButtons(v);
+            });
+            loadViewCubeExtension(v, `Viewer${idx === 0 ? 'A' : 'B'}`);
 
-        // ── Camera Sync ───────────────────────────────────────────────────────
-        // Use a debounced approach so ViewCube animated transitions are not
-        // cancelled by the immediate isSyncing=false flip.
-        let syncTimer = null;
+            // [고도화] 이벤트 기반 모델명 데이터 바인딩 (강제 전수조사 헬퍼 호출)
+            v.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
+                forceUpdateModelUI(v, idx);
+            });
+        });
 
-        const syncCamera = (src, dst, label) => {
-            if (isSyncing) return;
-            isSyncing = true;
+        // ── 헬퍼 함수: 특정 요소나 텍스트를 찾아 모델명 강제 주입 ───────────────────────
+        function forceUpdateModelUI(viewer, index) {
+            const model = viewer.model;
+            if (!model) return;
 
-            // Clear any pending sync first
-            if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }
+            // [1] 이름 추출 (사용자 지정 우선순위)
+            const modelName = model.getDocumentNode()?.data?.name ||
+                model.getData()?.loadOptions?.bubbleNode?.getDisplayName() ||
+                model.getMetadata('name') ||
+                "Unknown Model";
 
-            try {
-                const state = src.getState({ viewport: true, camera: true });
-                // Use immediate=true so dest camera jumps with src
-                dst.restoreState(state, null, true);
-            } catch (e) {
-                console.warn(`[CameraSync] ${label} error:`, e.message);
-            }
+            const labelKey = index === 0 ? 'slot-a-name' : 'slot-b-name';
+            console.log(`[Diff][Force] Viewer ${index === 0 ? 'A' : 'B'} name sync: ${modelName}`);
 
-            // Release the lock after a short delay so that any follow-up
-            // CAMERA_CHANGE_EVENTs from restoreState don't ping-pong.
-            syncTimer = setTimeout(() => {
-                isSyncing = false;
-                syncTimer = null;
-            }, 80);
-        };
+            // 1. ID로 직접 업데이트
+            const elById = document.getElementById(labelKey);
+            if (elById) elById.textContent = modelName;
 
-        viewers[0].addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT,
-            () => syncCamera(viewers[0], viewers[1], 'A→B'));
-        viewers[1].addEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT,
-            () => syncCamera(viewers[1], viewers[0], 'B→A'));
+            // 2. [사용자 요청] 전수 조사: 상단바에서 "Select from tree..." 텍스트를 가진 요소 모두 교체
+            const allSlotValues = document.querySelectorAll('.slot-value, .version-info, .version-label');
+            allSlotValues.forEach(el => {
+                if (el.textContent.includes('Select from tree...')) {
+                    // index 0이면 A측, index 1이면 B측 요소를 매칭 (부모가 slot-a/b 인지 확인)
+                    const isSideA = el.closest('#slot-a') || el.id === 'slot-a-name' || el.classList.contains('slot-a');
+                    const isSideB = el.closest('#slot-b') || el.id === 'slot-b-name' || el.classList.contains('slot-b');
+
+                    if (index === 0 && isSideA) el.textContent = modelName;
+                    if (index === 1 && isSideB) el.textContent = modelName;
+
+                    // 만약 구분이 모호하다면 텍스트 내용만으로 임시 교체
+                    if (!isSideA && !isSideB) {
+                        el.textContent = modelName;
+                    }
+                }
+            });
+        }
+        window.forceUpdateModelUI = forceUpdateModelUI; // 타 파일(main.js 등)에서도 인지 가능하도록 등록
+
 
         // ── ViewCube debug + smooth-transition override ───────────────────────
         const patchViewCube = (viewer, label) => {
@@ -219,8 +339,31 @@ async function loadViewCubeExtension(viewer, label) {
  * Loads models into the split views.
  */
 export async function loadVersions(urnA, urnB) {
+    console.log('[Diff] loadVersions started...');
     await initSplitViewers();
+
+    // 모델 로드 수행
     await Promise.all([loadModel(viewers[0], urnA), loadModel(viewers[1], urnB)]);
+
+    // [강제 업데이트] 로드 완료 후 즉시 이름 주입 (이벤트가 씹히는 경우 대비)
+    [0, 1].forEach(idx => {
+        const v = viewers[idx];
+        if (v && v.model) {
+            const name = v.model.getDocumentNode()?.data?.name ||
+                v.model.getData()?.loadOptions?.bubbleNode?.getDisplayName() ||
+                "Unknown Model";
+
+            const elId = idx === 0 ? 'slot-a-name' : 'slot-b-name';
+            const el = document.getElementById(elId);
+
+            if (el) {
+                el.textContent = name;
+                console.log(`[Manual UI Update] ${elId} successfully set to: ${name}`);
+            } else {
+                console.error(`[Manual UI Update] Element not found: ${elId}`);
+            }
+        }
+    });
 }
 
 /**
@@ -275,7 +418,8 @@ async function getModelMap(viewer) {
                             name: p.name,
                             properties: p.properties,
                             externalId: extId,
-                            category: p.properties.find(pr => pr.displayName === 'Category')?.displayValue || 'Element'
+                            category: p.properties.find(pr => pr.displayName === 'Category')?.displayValue || 'Element',
+                            level: p.properties.find(pr => ['Level', 'Base Level', 'Constraint', 'Reference Level'].includes(pr.displayName))?.displayValue || '-'
                         });
                     }
                 });
@@ -369,25 +513,27 @@ function compareProperties(propsA, propsB) {
 
         if (valA === valB) continue;
 
-        // Handle undefined (prop exists in one but not other)
-        if (valA === undefined || valB === undefined) {
-            changes.push({ key, old: valA, new: valB });
-            continue;
-        }
+        let isDifferent = false;
 
-        // Numeric comparison with tolerance (handle strings that look like numbers)
+        // Numeric comparison with tolerance
         const numA = parseFloat(valA);
         const numB = parseFloat(valB);
 
         if (!isNaN(numA) && !isNaN(numB)) {
             if (Math.abs(numA - numB) > TOLERANCE) {
-                changes.push({ key, old: valA, new: valB });
+                isDifferent = true;
             }
         } else {
             // String comparison
             if (String(valA) !== String(valB)) {
-                changes.push({ key, old: valA, new: valB });
+                isDifferent = true;
             }
+        }
+
+        if (isDifferent) {
+            const oldVal = (valA === undefined) ? '(none)' : valA;
+            const newVal = (valB === undefined) ? '(none)' : valB;
+            changes.push(`${key}: ${oldVal} → <b>${newVal}</b>`);
         }
     }
     return changes;
@@ -495,19 +641,22 @@ function populateTable(type, list, tbodyId) {
     list.forEach(obj => {
         const tr = document.createElement('tr');
         tr.className = 'diff-row-v2';
+        tr.dataset.dbId = obj.dbId; // Store dbId for later extraction (e.g. PDF Export)
 
         if (type === 'changed') {
-            const diffCount = obj.diffs ? obj.diffs.length : 0;
+            const changesHtml = (obj.diffs || []).join('<br>');
+            const changesText = (obj.diffs || []).join('\n').replace(/<b>/g, '').replace(/<\/b>/g, '');
             tr.innerHTML = `
                 <td><div class="table-name" title="${obj.name}">${obj.name || 'Unknown'}</div></td>
                 <td><span class="category-pill">${obj.category || 'Element'}</span></td>
-                <td><span class="change-count" style="color: #eab308; font-weight: bold;">${diffCount} 속성 변경</span></td>
+                <td><span class="level-info">${obj.level || '-'}</span></td>
+                <td><div class="table-changes" title="${changesText}">${changesHtml}</div></td>
             `;
         } else {
             tr.innerHTML = `
                 <td><div class="table-name" title="${obj.name}">${obj.name || 'Unknown'}</div></td>
                 <td><span class="category-pill">${obj.category || 'Element'}</span></td>
-                <td><span class="level-info">-</span></td>
+                <td><span class="level-info">${obj.level || '-'}</span></td>
             `;
         }
 
@@ -669,6 +818,109 @@ function applyThemingColorToList(viewer, list, color) {
 
 export function showDiffList(type) { }
 
+// ── Snapshot Capture Utilities ────────────────────────────────────────────────
+
+/**
+ * Captures a screenshot of a single object in the given viewer.
+ * Flow: isolate → fitToView → wait for CAMERA_TRANSITION_COMPLETED (or 1.2s) → getScreenShot
+ *
+ * @param {Autodesk.Viewing.Viewer3D} viewer
+ * @param {number} dbId
+ * @param {number} [width=400]
+ * @param {number} [height=300]
+ * @returns {Promise<string>} Base64 DataURL (image/jpeg)
+ */
+async function captureSnapshotForItem(viewer, dbId, width = 400, height = 300) {
+    if (!viewer || !viewer.model) return null;
+
+    try {
+        // [1] 객체 고립 및 포커스 (Standard Public API)
+        viewer.isolate(dbId);
+        viewer.fitToView(dbId);
+
+        // [2] 화면이 완전히 그려질 때까지 넉넉하게 대기 (대형 모델 안정화)
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // [3] 하이브리드 스냅샷 시도 (Public API + DOM Fallback)
+        return new Promise((resolve) => {
+            try {
+                // 이전에 'viewer.impl'을 사용하던 로직을 완전히 제거하고 공식 API 우선 사용
+                viewer.getScreenShot(width, height, (blobOrUrl) => {
+                    if (blobOrUrl && blobOrUrl.length > 500) {
+                        console.log(`[Snapshot] Public API success for dbId ${dbId} (len: ${blobOrUrl.length})`);
+                        resolve(blobOrUrl);
+                    } else {
+                        // [4] 공식 API 실패 시 최후의 보루: 브라우저 표준 DOM 방식 캔버스 복제
+                        try {
+                            const canvas = viewer.canvas || (viewer.container && viewer.container.querySelector('canvas'));
+                            if (canvas) {
+                                // JPEG 85% 품질로 캔버스 내용 추출
+                                const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+                                if (dataUrl && dataUrl.length > 500) {
+                                    console.log(`[Snapshot] DOM Canvas success for dbId ${dbId} (len: ${dataUrl.length})`);
+                                    resolve(dataUrl);
+                                    return;
+                                }
+                            }
+                            resolve(null);
+                        } catch (err) {
+                            console.error("[Snapshot] Final DOM capture retry failed:", err);
+                            resolve(null);
+                        }
+                    }
+                });
+            } catch (err) {
+                console.error(`[Snapshot] Public API call exception:`, err);
+                resolve(null);
+            }
+        });
+    } catch (e) {
+        console.error(`[Snapshot] Critical error at dbId ${dbId}:`, e);
+        return null;
+    }
+}
+
+/**
+ * Shows / updates the snapshot progress overlay.
+ * @param {number} current - Items done so far
+ * @param {number} total   - Total items
+ * @param {string} [label] - Current item name
+ */
+function showSnapshotProgress(current, total, label = '') {
+    let overlay = document.getElementById('snapshot-progress-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'snapshot-progress-overlay';
+        overlay.innerHTML = `
+            <div class="sp-inner">
+                <p class="sp-title">📸 스냅샷 생성 중...</p>
+                <p class="sp-label" id="sp-label"></p>
+                <div class="sp-track"><div class="sp-fill" id="sp-fill"></div></div>
+                <p class="sp-count" id="sp-count"></p>
+            </div>`;
+        document.body.appendChild(overlay);
+    }
+
+    const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+    const fillEl = document.getElementById('sp-fill');
+    const labelEl = document.getElementById('sp-label');
+    const countEl = document.getElementById('sp-count');
+
+    if (fillEl) fillEl.style.width = pct + '%';
+    if (labelEl) labelEl.textContent = label ? `"${label}"` : '';
+    if (countEl) countEl.textContent = `${current} / ${total}`;
+
+    overlay.style.display = 'flex';
+}
+
+/** Hides the snapshot progress overlay. */
+function hideSnapshotProgress() {
+    const overlay = document.getElementById('snapshot-progress-overlay');
+    if (overlay) overlay.style.display = 'none';
+}
+
+
+
 /**
  * Fully terminates compare mode.
  * Called by main.js handleExitCompare.
@@ -758,10 +1010,25 @@ window.exportDiffExcel = function () {
     const wb = XLSX.utils.book_new();
 
     const makeSheet = (list, status) => {
-        const rows = [['Name', 'Category', 'Status']];
-        (list || []).forEach(obj => rows.push([obj.name || '', obj.category || '', status]));
+        const isChanged = status === 'Changed';
+        const headers = ['Name', 'Category', 'Level', 'Status'];
+        if (isChanged) headers.splice(3, 0, 'Changes');
+        const rows = [headers];
+
+        (list || []).forEach(obj => {
+            if (isChanged) {
+                const changes = (obj.diffs || []).join('\n').replace(/<b>/g, '').replace(/<\/b>/g, '');
+                rows.push([obj.name || '', obj.category || '', obj.level || '', changes, status]);
+            } else {
+                rows.push([obj.name || '', obj.category || '', obj.level || '-', status]);
+            }
+        });
+
         const ws = XLSX.utils.aoa_to_sheet(rows);
-        ws['!cols'] = [{ wch: 45 }, { wch: 25 }, { wch: 12 }];
+        ws['!cols'] = isChanged
+            ? [{ wch: 40 }, { wch: 20 }, { wch: 15 }, { wch: 60 }, { wch: 12 }]
+            : [{ wch: 45 }, { wch: 25 }, { wch: 15 }, { wch: 12 }];
+
         return ws;
     };
 
@@ -789,10 +1056,24 @@ window.exportFilteredDiffExcel = function () {
     const wb = XLSX.utils.book_new();
 
     const makeSheet = (list, status) => {
-        const rows = [['Name', 'Category', 'Status']];
-        (list || []).forEach(obj => rows.push([obj.name || '', obj.category || '', status]));
+        const isChanged = status === 'Changed';
+        const headers = ['Name', 'Category', 'Level', 'Status'];
+        if (isChanged) headers.splice(3, 0, 'Changes');
+        const rows = [headers];
+
+        (list || []).forEach(obj => {
+            if (isChanged) {
+                rows.push([obj.name || '', obj.category || '', obj.level || '', obj.changes || '', status]);
+            } else {
+                rows.push([obj.name || '', obj.category || '', obj.level || '', status]);
+            }
+        });
+
         const ws = XLSX.utils.aoa_to_sheet(rows);
-        ws['!cols'] = [{ wch: 45 }, { wch: 25 }, { wch: 12 }];
+        ws['!cols'] = isChanged
+            ? [{ wch: 40 }, { wch: 20 }, { wch: 15 }, { wch: 60 }, { wch: 12 }]
+            : [{ wch: 45 }, { wch: 25 }, { wch: 15 }, { wch: 12 }];
+
         return ws;
     };
 
@@ -920,7 +1201,12 @@ function getVisibleRows(tbodyId) {
                 || cells[0]?.textContent.trim() || '';
             const category = cells[1]?.querySelector('.category-pill')?.textContent.trim()
                 || cells[1]?.textContent.trim() || '';
-            return { name, category };
+            const level = cells[2]?.querySelector('.level-info')?.textContent.trim()
+                || cells[2]?.textContent.trim() || '';
+            const changes = cells[3]?.querySelector('.table-changes')?.title.trim()
+                || cells[3]?.textContent.trim() || '';
+            const dbId = parseInt(tr.dataset.dbId);
+            return { name, category, level, changes, dbId };
         });
 }
 
@@ -928,16 +1214,97 @@ function getVisibleRows(tbodyId) {
 
 /**
  * Builds and saves a PDF from provided section data.
- * @param {Array<{title,data,color}>} sections
+ * @param {Array<{title, data, color, viewerKey}>} sections
+ *   viewerKey: 'new' => viewers[1], 'old' => viewers[0]  (used for snapshot capture)
  * @param {string} filename
+ * @param {object} [options]
+ * @param {boolean} [options.includeSnapshots=false]
  */
-async function generatePdfDocument(sections, filename) {
+async function generatePdfDocument(sections, filename, options = {}) {
     const { jsPDF } = window.jspdf;
     if (!jsPDF) return alert('PDF 라이브러리가 로드되지 않았습니다.');
 
+    const includeSnapshots = !!options.includeSnapshots;
     const btn = document.getElementById('btn-export-pdf');
+    const chk = document.getElementById('chk-include-snapshots');
     const origLabel = btn?.textContent;
-    if (btn) btn.textContent = '⏳ 생성 중...';
+
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 생성 중...';
+    }
+    if (chk) chk.disabled = true;
+
+    console.log(`[PDF] Export started. Snapshots=${includeSnapshots}`);
+
+    // ── Phase 1: Pre-capture snapshots (if enabled) ───────────────────────────
+    // snapshots[sectionIndex][itemIndex] = dataUrl | null
+    let snapshots = null;
+
+    if (includeSnapshots) {
+        snapshots = [];
+        const vNew = viewers[1]; // Added / Changed → New model viewer
+        const vOld = viewers[0]; // Removed         → Old model viewer
+
+        // Count total items across all sections
+        const totalItems = sections.reduce((sum, s) => sum + (s.data?.length || 0), 0);
+        let captured = 0;
+
+        showSnapshotProgress(0, totalItems, '');
+
+        console.time('[PDF] Snapshot Capture Phase');
+        for (let si = 0; si < sections.length; si++) {
+            const section = sections[si];
+            const sectionSnaps = [];
+            snapshots.push(sectionSnaps);
+
+            // Decide which viewer to use based on section type
+            const isRemoved = section.title.toLowerCase().includes('removed') ||
+                (section.viewerKey === 'old');
+            const targetViewer = isRemoved ? vOld : vNew;
+
+            console.log(`[PDF] Processing section "${section.title}" with viewer ${isRemoved ? 'Old' : 'New'}`);
+
+            for (let ii = 0; ii < (section.data || []).length; ii++) {
+                const obj = section.data[ii];
+                const itemName = obj.name || `Item ${ii + 1}`;
+
+                showSnapshotProgress(captured, totalItems, itemName);
+
+                let dataUrl = null;
+                if (obj.dbId && targetViewer && targetViewer.model) {
+                    try {
+                        dataUrl = await captureSnapshotForItem(targetViewer, obj.dbId, 400, 300);
+                    } catch (snapErr) {
+                        console.error(`[PDF] Error capturing dbId: ${obj.dbId}. Continuing...`, snapErr);
+                    }
+                } else {
+                    console.warn(`[PDF] Skipping item ${ii} in "${section.title}": dbId=${obj.dbId}, viewerReady=${!!(targetViewer && targetViewer.model)}`);
+                }
+
+                sectionSnaps.push(dataUrl);
+                captured++;
+                showSnapshotProgress(captured, totalItems, itemName);
+            }
+        }
+        console.timeEnd('[PDF] Snapshot Capture Phase');
+        console.log(`[PDF] Total items processed: ${captured}/${totalItems}`);
+
+        // Restore viewers after capture
+        try {
+            if (vNew && vNew.model) vNew.showAll();
+            if (vOld && vOld.model) vOld.showAll();
+        } catch (_) { /* ignore */ }
+
+        hideSnapshotProgress();
+        if (btn) btn.textContent = '⏳ PDF 레이아웃 빌드 중...';
+    }
+
+    // ── Phase 2: Build PDF ────────────────────────────────────────────────────
+    const SNAP_COL_W = 55;  // mm width of snapshot column in PDF
+    const SNAP_IMG_W = 50;  // mm image width
+    const SNAP_IMG_H = 37.5; // mm image height (400x300 → 4:3 ratio)
+    const SNAP_ROW_H = 40;  // mm row height when snapshot is shown
 
     try {
         const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -960,11 +1327,17 @@ async function generatePdfDocument(sections, filename) {
         doc.text(`날짜: ${today}`, 14, 21);
         doc.text(`Version A: ${versionAName}`, 14, 28);
         doc.text(`Version B: ${versionBName}`, 80, 28);
+        if (includeSnapshots) {
+            doc.text('📸 스냅샷 포함', 160, 28);
+        }
         doc.setTextColor(0, 0, 0);
 
         let curY = 40;
 
-        for (const section of sections) {
+        for (let si = 0; si < sections.length; si++) {
+            const section = sections[si];
+            const sectionSnaps = snapshots ? snapshots[si] : null;
+
             doc.setFontSize(11);
             doc.setFont(fontName, 'bold');
             doc.setTextColor(...section.color);
@@ -972,25 +1345,131 @@ async function generatePdfDocument(sections, filename) {
             doc.setTextColor(0, 0, 0);
             doc.setFont(fontName, 'normal');
 
-            const rows = section.data.map(obj => [obj.name || '(이름 없음)', obj.category || '요소']);
+            const isChangedSection = section.title.includes('Changed');
 
-            doc.autoTable({
-                head: [['이름 (Name)', '카테고리 (Category)']],
-                body: rows.length ? rows : [['(항목 없음)', '']],
-                startY: curY + 4,
-                ...koreanTableStyles(section.color)
+            let head, colStyles;
+
+            if (includeSnapshots) {
+                head = isChangedSection
+                    ? [['스냅샷', '이름 (Name)', '카테고리', '레벨', '변경 내용']]
+                    : [['스냅샷', '이름 (Name)', '카테고리 (Category)', '레벨 (Level)']];
+
+                colStyles = isChangedSection
+                    ? { 0: { cellWidth: SNAP_COL_W, avoidPageBreak: true }, 1: { cellWidth: 40 }, 2: { cellWidth: 25 }, 3: { cellWidth: 20 }, 4: { cellWidth: 'auto' } }
+                    : { 0: { cellWidth: SNAP_COL_W, avoidPageBreak: true }, 1: { cellWidth: 65 }, 2: { cellWidth: 40 }, 3: { cellWidth: 'auto' } };
+            } else {
+                head = isChangedSection
+                    ? [['이름 (Name)', '카테고리', '레벨', '변경 내용 (Changes)']]
+                    : [['이름 (Name)', '카테고리 (Category)', '레벨 (Level)']];
+
+                colStyles = isChangedSection
+                    ? { 0: { cellWidth: 45 }, 1: { cellWidth: 30 }, 2: { cellWidth: 25 }, 3: { cellWidth: 'auto' } }
+                    : { 0: { cellWidth: 80 }, 1: { cellWidth: 50 }, 2: { cellWidth: 'auto' } };
+            }
+
+            const rows = (section.data || []).map((obj, ii) => {
+                const name = obj.name || '(이름 없음)';
+                const cat = obj.category || '요소';
+                const lvl = obj.level || '-';
+
+                if (includeSnapshots) {
+                    if (isChangedSection) {
+                        const ch = (obj.changes || (obj.diffs || []).join('\n')).replace(/<b>/g, '').replace(/<\/b>/g, '');
+                        return [{ content: '' }, name, cat, lvl, ch]; // cell 0 = image placeholder
+                    }
+                    return [{ content: '' }, name, cat, lvl];
+                }
+
+                if (isChangedSection) {
+                    const ch = (obj.changes || (obj.diffs || []).join('\n')).replace(/<b>/g, '').replace(/<\/b>/g, '');
+                    return [name, cat, lvl, ch];
+                }
+                return [name, cat, lvl];
             });
 
+            // 프로젝트 명 동적 추출 (UI 요소 기반)
+            const dynamicProjectName = document.querySelector('.sidebar-title')?.innerText ||
+                document.getElementById('model-name-label')?.innerText ||
+                "BIM Comparison Project";
+
+            const tableOptions = {
+                head: head,
+                body: rows.length ? rows : [includeSnapshots ? [{ content: '(항목 없음)', colSpan: head[0].length }] : ['(항목 없음)', '', '']],
+                startY: curY + 4,
+                ...koreanTableStyles(section.color),
+                columnStyles: colStyles,
+                headStyles: {
+                    fillColor: section.color,
+                    fontStyle: 'bold',
+                    halign: 'center',
+                    valign: 'middle',
+                    minCellHeight: 10,
+                    textColor: [255, 255, 255]
+                },
+                styles: {
+                    overflow: 'linebreak',
+                    font: fontName,
+                    minCellHeight: includeSnapshots ? SNAP_ROW_H : 0
+                },
+                rowPageBreak: 'avoid',
+                didDrawPage: (data) => {
+                    // 상단 텍스트 제거 (사용자 요청: 깔끔한 상단 복구)
+                    // 날짜 및 프로젝트명은 더 이상 출력되지 않습니다.
+                }
+            };
+
+            // Insert snapshot images inside each data row's first cell
+            if (includeSnapshots && sectionSnaps) {
+                tableOptions.didDrawCell = (hookData) => {
+                    if (hookData.section !== 'body' || hookData.column.index !== 0) return;
+
+                    const rowIdx = hookData.row.index;
+                    const dataUrl = sectionSnaps[rowIdx];
+
+                    // If dataUrl is invalid, show fallback text
+                    if (!dataUrl || typeof dataUrl !== 'string' || dataUrl.length < 500) {
+                        if (hookData.row.raw[0] !== '(항목 없음)') {
+                            const { x, y, width: cw, height: ch } = hookData.cell;
+                            doc.setFontSize(7);
+                            doc.setTextColor(150, 150, 150);
+                            doc.text('이미지 로딩 실패', x + 5, y + ch / 2, { align: 'left' });
+                            doc.setTextColor(0, 0, 0);
+                        }
+                        return;
+                    }
+                    if (hookData.row.raw[0] === '(항목 없음)') return;
+
+                    const { x, y, width: cw, height: ch } = hookData.cell;
+                    // Center image within the cell
+                    const imgX = x + (cw - SNAP_IMG_W) / 2;
+                    const imgY = y + (ch - SNAP_IMG_H) / 2;
+
+                    try {
+                        console.log(`[PDF Debug] Item ${rowIdx} at X=${imgX.toFixed(1)}, Y=${imgY.toFixed(1)}`);
+                        doc.addImage(dataUrl, 'JPEG', imgX, imgY, SNAP_IMG_W, SNAP_IMG_H, undefined, 'FAST');
+                    } catch (imgErr) {
+                        console.warn('[PDF] addImage failed:', imgErr.message);
+                    }
+                };
+            }
+
+            doc.autoTable(tableOptions);
             curY = doc.lastAutoTable.finalY + 10;
         }
 
         const fileDate = new Date().toISOString().slice(0, 10);
-        doc.save(`${filename}_${fileDate}.pdf`);
+        const suffix = includeSnapshots ? '_with_snapshots' : '';
+        doc.save(`${filename}${suffix}_${fileDate}.pdf`);
     } catch (err) {
         console.error('[PDF Export Error]', err);
         alert(`PDF 생성 중 오류 발생: ${err.message}`);
     } finally {
-        if (btn) btn.textContent = origLabel;
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = origLabel;
+        }
+        if (chk) chk.disabled = false;
+        hideSnapshotProgress();
     }
 }
 
@@ -1001,12 +1480,14 @@ window.exportDiffPdf = async function () {
         (currentDiffData.changed?.length || 0);
     if (total === 0) return alert('내보낼 데이터가 없습니다.');
 
+    const includeSnapshots = document.getElementById('chk-include-snapshots')?.checked || false;
+
     const sections = [
-        { title: `추가된 요소 (Added) — ${(currentDiffData.added || []).length}건`, data: currentDiffData.added || [], color: [0, 160, 80] },
-        { title: `삭제된 요소 (Removed) — ${(currentDiffData.removed || []).length}건`, data: currentDiffData.removed || [], color: [200, 50, 50] },
-        { title: `변경된 요소 (Changed) — ${(currentDiffData.changed || []).length}건`, data: currentDiffData.changed || [], color: [190, 140, 0] }
+        { title: `추가된 요소 (Added) — ${(currentDiffData.added || []).length}건`, data: currentDiffData.added || [], color: [0, 160, 80], viewerKey: 'new' },
+        { title: `삭제된 요소 (Removed) — ${(currentDiffData.removed || []).length}건`, data: currentDiffData.removed || [], color: [200, 50, 50], viewerKey: 'old' },
+        { title: `변경된 요소 (Changed) — ${(currentDiffData.changed || []).length}건`, data: currentDiffData.changed || [], color: [190, 140, 0], viewerKey: 'new' }
     ];
-    await generatePdfDocument(sections, 'BIM_Full_Report');
+    await generatePdfDocument(sections, 'BIM_Full_Report', { includeSnapshots });
 };
 
 /**
@@ -1018,16 +1499,18 @@ window.exportFilteredDiffPdf = async function () {
     const addedVisible = getVisibleRows('list-added');
     const removedVisible = getVisibleRows('list-removed');
     const changedVisible = getVisibleRows('list-changed');
-    const total = addedVisible.length + removedVisible.length + changedVisible.length;
+    const totalCount = addedVisible.length + removedVisible.length + changedVisible.length;
 
-    if (total === 0) return alert('필터링된 데이터가 없습니다.\n카테고리 필터를 먼저 적용한 뒤 시도해 주세요.');
+    if (totalCount === 0) return alert('필터링된 데이터가 없습니다.\n카테고리 필터를 먼저 적용한 뒤 시도해 주세요.');
+
+    const includeSnapshots = document.getElementById('chk-include-snapshots')?.checked || false;
 
     const sections = [
-        { title: `추가된 요소 (Added) — ${addedVisible.length}건`, data: addedVisible, color: [0, 160, 80] },
-        { title: `삭제된 요소 (Removed) — ${removedVisible.length}건`, data: removedVisible, color: [200, 50, 50] },
-        { title: `변경된 요소 (Changed) — ${changedVisible.length}건`, data: changedVisible, color: [190, 140, 0] }
+        { title: `추가된 요소 (Added) — ${addedVisible.length}건`, data: addedVisible, color: [0, 160, 80], viewerKey: 'new' },
+        { title: `삭제된 요소 (Removed) — ${removedVisible.length}건`, data: removedVisible, color: [200, 50, 50], viewerKey: 'old' },
+        { title: `변경된 요소 (Changed) — ${changedVisible.length}건`, data: changedVisible, color: [190, 140, 0], viewerKey: 'new' }
     ];
-    await generatePdfDocument(sections, 'BIM_Filtered_Report');
+    await generatePdfDocument(sections, 'BIM_Filtered_Report', { includeSnapshots });
 };
 
 
@@ -1069,4 +1552,224 @@ window.testKoreanPdf = async function () {
     console.log('[Test] Korean PDF generated successfully.');
 };
 
+/* ============================================================
+   Resizing Engine — Robust Implementation (Panel, Table, Vertical)
+   ============================================================ */
 
+const ResizingEngine = (() => {
+    let panelDragging = false;
+    let vDragging = false;
+    let colDragging = false;
+
+    let startX = 0, startY = 0;
+    let startW = 0, startH = 0;
+    let activeTh = null;
+
+    function triggerViewerResize() {
+        requestAnimationFrame(() => {
+            // Resize split viewers (Viewer A, Viewer B) if they are in the array
+            if (viewers && viewers.length > 0) {
+                viewers.forEach(v => { if (v && v.resize) v.resize(); });
+            }
+            // Resize main viewer if it exists on window._viewer
+            if (window._viewer && window._viewer.resize) {
+                window._viewer.resize();
+            }
+            // Force browser layout update
+            window.dispatchEvent(new Event('resize'));
+        });
+    }
+
+    // ── 1. Side Panel Resizing (Right Sidebar) ──────────────────
+    function initPanelResizer() {
+        const handle = document.getElementById('panel-resizer-handle');
+        const sidebar = document.getElementById('sidebar-right');
+        if (!handle || !sidebar) return;
+
+        handle.addEventListener('mousedown', (e) => {
+            if (e.target.closest('#ai-collapse-btn')) return;
+            panelDragging = true;
+            startX = e.clientX;
+            startW = sidebar.getBoundingClientRect().width;
+            handle.classList.add('dragging');
+            sidebar.classList.add('no-transition');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!panelDragging) return;
+            const delta = startX - e.clientX;
+            let newW = startW + delta;
+
+            // Limits: 200px to 70% of screen
+            newW = Math.min(window.innerWidth * 0.7, Math.max(200, newW));
+
+            sidebar.style.width = newW + 'px';
+            if (newW > 50) {
+                sidebar.classList.remove('collapsed');
+                localStorage.setItem('ai-panel-collapsed', 'false');
+            }
+            triggerViewerResize();
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!panelDragging) return;
+            panelDragging = false;
+            handle.classList.remove('dragging');
+            sidebar.classList.remove('no-transition');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            localStorage.setItem('ai-panel-width', parseInt(sidebar.style.width));
+        });
+
+        // Toggle Collapse
+        const collapseBtn = document.getElementById('ai-collapse-btn');
+        if (collapseBtn) {
+            collapseBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const nowCollapsed = sidebar.classList.toggle('collapsed');
+                localStorage.setItem('ai-panel-collapsed', nowCollapsed);
+
+                if (!nowCollapsed && (!sidebar.style.width || sidebar.style.width === '0px')) {
+                    const savedW = localStorage.getItem('ai-panel-width');
+                    sidebar.style.width = (savedW || 360) + 'px';
+                }
+
+                // Wait for transition animation to finish before resizing viewer
+                setTimeout(triggerViewerResize, 350);
+            });
+        }
+    }
+
+    // ── 2. Vertical Results Area Resizing ───────────────────────
+    function initVerticalResizer() {
+        const vHandle = document.getElementById('diff-v-resizer-handle');
+        const resultsArea = document.getElementById('diff-results-three-columns');
+        if (!vHandle || !resultsArea) return;
+
+        vHandle.addEventListener('mousedown', (e) => {
+            vDragging = true;
+            startY = e.clientY;
+            startH = resultsArea.getBoundingClientRect().height;
+            vHandle.classList.add('dragging');
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            e.preventDefault();
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!vDragging) return;
+            const delta = e.clientY - startY;
+            const maxH = window.innerHeight * 0.7; // Limit to 70% of screen
+            const newH = Math.max(100, Math.min(maxH, startH - delta));
+
+            resultsArea.style.height = newH + 'px';
+            triggerViewerResize();
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!vDragging) return;
+            vDragging = false;
+            vHandle.classList.remove('dragging');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            triggerViewerResize();
+        });
+    }
+
+    // ── 3. Table Column Resizing ────────────────────────────────
+    function initTableColumnResizer() {
+        document.addEventListener('mousedown', (e) => {
+            if (e.target.classList.contains('th-resizer')) {
+                colDragging = true;
+                activeTh = e.target.parentElement;
+                startX = e.clientX;
+                startW = activeTh.getBoundingClientRect().width;
+                e.target.classList.add('dragging');
+                document.body.style.cursor = 'col-resize';
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!colDragging || !activeTh) return;
+            const delta = e.clientX - startX;
+            const newW = Math.max(40, startW + delta);
+            activeTh.style.width = newW + 'px';
+        });
+
+        document.addEventListener('mouseup', () => {
+            if (!colDragging) return;
+            colDragging = false;
+            const resizer = activeTh?.querySelector('.th-resizer');
+            if (resizer) resizer.classList.remove('dragging');
+            activeTh = null;
+            document.body.style.cursor = '';
+        });
+
+        // Auto-fit on Double Click
+        document.addEventListener('dblclick', (e) => {
+            const target = e.target.closest('th');
+            if (target && target.querySelector('.th-resizer')) {
+                autoFitColumn(target);
+            }
+        });
+    }
+
+    function autoFitColumn(th) {
+        const table = th.closest('table');
+        const index = Array.from(th.parentElement.children).indexOf(th);
+        const cells = table.querySelectorAll(`tbody tr td:nth-child(${index + 1})`);
+
+        let maxW = th.innerText.length * 9; // Approx base width
+
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        context.font = '11px Inter, sans-serif';
+
+        cells.forEach(cell => {
+            const textW = context.measureText(cell.innerText).width + 35; // padding
+            if (textW > maxW) maxW = textW;
+        });
+
+        th.style.width = Math.min(500, Math.max(50, maxW)) + 'px';
+    }
+
+    function loadSavedState() {
+        const sidebar = document.getElementById('sidebar-right');
+        const savedW = localStorage.getItem('ai-panel-width');
+        const isCollapsed = localStorage.getItem('ai-panel-collapsed') === 'true';
+
+        if (sidebar) {
+            if (savedW && !isNaN(parseInt(savedW))) {
+                sidebar.style.width = parseInt(savedW) + 'px';
+            }
+            if (isCollapsed) {
+                sidebar.classList.add('collapsed');
+            }
+        }
+
+        // Initial resize to ensure viewers match the loaded state
+        triggerViewerResize();
+    }
+
+    function init() {
+        initPanelResizer();
+        initVerticalResizer();
+        initTableColumnResizer();
+        loadSavedState();
+        console.log('[ResizingEngine] Initialized with persistent state and APS Viewer Sync');
+        console.log('[Resize Fix] Direction Corrected');
+    }
+
+    return { init };
+})();
+
+// Initialize on load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', ResizingEngine.init);
+} else {
+    ResizingEngine.init();
+}

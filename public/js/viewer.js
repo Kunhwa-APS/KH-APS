@@ -31,7 +31,8 @@ export async function initViewer(container) {
     const config = {
         extensions: [
             'Autodesk.DocumentBrowser',
-            'NavisClashExtension'
+            'NavisClashExtension',
+            'Autodesk.Viewing.MarkupsCore'
         ],
         preserveDrawingBuffer: true
     };
