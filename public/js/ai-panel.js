@@ -109,8 +109,7 @@ const AIPanel = (() => {
 - 주요 객체 현황: ${elementsText}
 - 총 객체 수: ${summary.totalElements}개
 
-[AI 지침] 우측 패널의 이슈 데이터는 모델 로딩과 무관하게 항상 유효합니다. 
-모델이 없을 때는 "3D 조작은 불가능하지만, 현재 프로젝트의 이슈 데이터는 확인 가능합니다"라고 답변하십시오.`;
+[AI 지침] 우측 패널의 이슈 데이터는 모델 로딩과 무관하게 항상 유효합니다. 프로젝트 기반의 모든 질문에 최선을 다해 답변하십시오.`;
 
         console.log('[AI-Panel] System Context Updated (Viewer-Independent Mode):', uiModelName);
     }

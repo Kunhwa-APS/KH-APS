@@ -4888,3 +4888,130 @@ input:checked+.slider:before {
     background: #059669;
     transform: translateY(-1px);
 }
+
+/* ── Markup Graphics Optimization ────────────────────────── */
+.markup-engine-layer-container svg path,
+.markup-engine-layer-container svg line,
+.markup-engine-layer-container svg polyline,
+.markup-engine-layer-container svg circle,
+.markup-engine-layer-container svg ellipse {
+    vector-effect: non-scaling-stroke !important;
+}
+
+/* ── Issue Creation Markers ─────────────────────────────────── */
+.issue-temp-marker,
+.issue-marker {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background: var(--accent-red);
+    border: 2px solid #fff;
+    border-radius: 50%;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 2000;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5), 0 0 15px var(--accent-red);
+    transform: translate(-50%, -50%);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.issue-temp-marker.green,
+.issue-marker.green {
+    background: var(--accent-green);
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5), 0 0 15px var(--accent-green);
+}
+
+.issue-marker:hover {
+    transform: translate(-50%, -50%) scale(1.2);
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.6), 0 0 20px var(--accent-red);
+}
+
+.issue-marker.green:hover {
+    box-shadow: 0 0 15px rgba(0, 0, 0, 0.6), 0 0 20px var(--accent-green);
+}
+
+/* ── Issue Marker Visibility Toggle ──────────────────────────── */
+#issue-marker-toggle-wrap {
+    position: absolute;
+    top: 60px;
+    left: 16px;
+    z-index: 9991;
+    pointer-events: auto;
+}
+
+.issue-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px 8px 12px;
+    background: rgba(15, 17, 26, 0.82);
+    border: 1px solid rgba(99, 102, 241, 0.35);
+    border-radius: 24px;
+    cursor: pointer;
+    color: #c4c9e2;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.45);
+    user-select: none;
+    transition: background 0.2s, box-shadow 0.2s;
+}
+
+.issue-toggle-label:hover {
+    background: rgba(99, 102, 241, 0.18);
+    box-shadow: 0 4px 24px rgba(99, 102, 241, 0.25);
+}
+
+.issue-toggle-label i {
+    color: #6366f1;
+    font-size: 14px;
+}
+
+/* Track */
+.issue-toggle-track {
+    position: relative;
+    width: 38px;
+    height: 20px;
+    margin-left: 4px;
+    flex-shrink: 0;
+}
+
+.issue-toggle-track input[type="checkbox"] {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+}
+
+/* Thumb */
+.issue-toggle-thumb {
+    position: absolute;
+    inset: 0;
+    background: #2d3048;
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background 0.25s;
+}
+
+.issue-toggle-thumb::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #94a3b8;
+    transition: transform 0.25s, background 0.25s;
+}
+
+.issue-toggle-track input:checked+.issue-toggle-thumb {
+    background: rgba(99, 102, 241, 0.55);
+}
+
+.issue-toggle-track input:checked+.issue-toggle-thumb::after {
+    transform: translateX(18px);
+    background: #6366f1;
+    box-shadow: 0 0 8px rgba(99, 102, 241, 0.7);
+}

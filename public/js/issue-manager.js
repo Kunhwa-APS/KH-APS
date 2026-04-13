@@ -73,7 +73,18 @@ export class IssueManager {
         this.isCreationMode = false;
         this.exportPayload = null; // [New] Store the issues for PDF export directly to avoid dataset limits
         this._onIssueClick = this._onIssueClick.bind(this);
+        this._onCameraChange = this._onCameraChange.bind(this); // [New] Camera Sync
+        this.tempIssueMarker = null; // [New] HTML Marker Element
+        this.tempIssuePosition = null; // [New] 3D World Position
+        this.htmlMarkersMap = new Map();
+        // [Multi-Criteria Filter] Null = show all; set via this.setMarkerFilter()
+        this.activeStructureFilter = null;
+        this.activeWorkTypeFilter = null;
         this.initOverlays();
+
+        // [Nuclear Reconstruction] Infinite Update Loop at Browser Level
+        this._syncLoop = this._syncLoop.bind(this);
+        requestAnimationFrame(this._syncLoop);
     }
 
     /**
@@ -103,11 +114,81 @@ export class IssueManager {
             this.renderIssueList();
             this.restorePins();
             this._updateBulkBtnLabel();
+
+            // [Nuclear Reconstruction] Persistent Multi-event listeners
+            const syncEvents = [
+                Autodesk.Viewing.CAMERA_CHANGE_EVENT,
+                Autodesk.Viewing.VIEWER_STATE_RESTORED_EVENT,
+                Autodesk.Viewing.TRANSITION_COMPLETED_EVENT,
+                Autodesk.Viewing.FOCAL_LENGTH_CHANGED_EVENT,
+                Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT
+            ];
+
+            syncEvents.forEach(evt => {
+                this.viewer.removeEventListener(evt, this._onCameraChange);
+                this.viewer.addEventListener(evt, this._onCameraChange);
+            });
+
+            // [Filtering Logic] Trigger pin restoration on model load
+            this.viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
+                console.log('[Filtering Logic] Model loaded, restoring pins for current GUID');
+                this.restorePins();
+            });
+
+            console.log('[Nuclear Reconstruction] Hardware-level event binding complete');
+
+            // [Toggle Button] Inject marker visibility toggle into viewer container
+            this._injectMarkerToggle();
         } catch (err) {
             console.error('[IssueManager] Initialization failed:', err);
             // Fallback to empty list
             this.issues = [];
         }
+    }
+
+    /**
+     * [Toggle] Injects a floating toggle button into the viewer container.
+     */
+    _injectMarkerToggle() {
+        if (document.getElementById('issue-marker-toggle-wrap')) return;
+
+        const container = this.viewer.container;
+        const wrap = document.createElement('div');
+        wrap.id = 'issue-marker-toggle-wrap';
+        wrap.innerHTML = `
+            <label class="issue-toggle-label" title="이슈 마커 표시/숨기기">
+                <i class="fas fa-map-marker-alt"></i>
+                <span>이슈</span>
+                <div class="issue-toggle-track">
+                    <input type="checkbox" id="issue-marker-toggle-cb" checked>
+                    <span class="issue-toggle-thumb"></span>
+                </div>
+            </label>
+        `;
+        container.style.position = 'relative';
+        container.appendChild(wrap);
+
+        document.getElementById('issue-marker-toggle-cb').addEventListener('change', (e) => {
+            this.toggleMarkerVisibility(e.target.checked);
+        });
+    }
+
+    /**
+     * [Toggle] Show or hide all HTML issue markers.
+     * @param {boolean} visible - true: show, false: hide
+     */
+    toggleMarkerVisibility(visible) {
+        this.markersVisible = visible;
+        this.htmlMarkersMap.forEach((data) => {
+            if (data.element) {
+                data.element.style.visibility = visible ? 'visible' : 'hidden';
+            }
+        });
+        // Also hide/show temp marker if present
+        if (this.tempIssueMarker) {
+            this.tempIssueMarker.style.visibility = visible ? 'visible' : 'hidden';
+        }
+        console.log(`[Toggle] Issue markers ${visible ? 'shown' : 'hidden'}`);
     }
 
     initOverlays() {
@@ -135,21 +216,21 @@ export class IssueManager {
         this.isCreationMode = (on !== undefined) ? on : !this.isCreationMode;
         console.log(`[IssueManager] Creation Mode: ${this.isCreationMode}`);
 
-        // [Fix] 캔버스가 아닌 뷰어 전체 컨테이너에 이벤트 리스너 부착하여 클릭 유실(Swallowing) 방지
-        const targetElement = this.viewer.container;
+        // [Emergency Fix] Use viewer.canvas for listener as requested by User
+        const targetElement = this.viewer.canvas;
 
-        // Remove existing listener to strictly prevent duplicates
+        // Clean up both container and canvas listeners to prevent any conflict
+        this.viewer.container.removeEventListener('click', this._onIssueClick);
         targetElement.removeEventListener('click', this._onIssueClick);
 
         if (this.isCreationMode) {
             targetElement.style.cursor = 'crosshair';
-            targetElement.classList.add('issue-creation-active');
             targetElement.addEventListener('click', this._onIssueClick);
-            console.log('[IssueManager] Click event listener attached to viewer container');
+            console.log('[Restore] Click listener re-registered on viewer.canvas');
         } else {
-            targetElement.style.cursor = ''; // Revert to default
-            targetElement.classList.remove('issue-creation-active');
-            console.log('[IssueManager] Click event listener removed');
+            targetElement.style.cursor = '';
+            targetElement.removeEventListener('click', this._onIssueClick);
+            console.log('[Restore] Click listener removed from viewer.canvas');
         }
 
         // Update toolbar button state if it exists
@@ -166,54 +247,145 @@ export class IssueManager {
     }
 
     _onIssueClick(e) {
-        console.log('[IssueManager] Click detected -> beginning instant capture flow');
+        console.log('[Emergency] Click detected -> capturing world coordinates');
 
-        // [Fix] 1. 좌표 보정: 브라우저 뷰포트(clientX/Y)에서 뷰어 컨테이너의 위치(getBoundingClientRect)를 차감
-        const rect = this.viewer.container.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        try {
+            const rect = this.viewer.container.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
 
-        // [Fix] 2. 디버깅 로그 추가 (좌표 및 오프셋 확인용)
-        console.log(`[IssueManager] Coordinate Debug:
-            - ClientX/Y: (${e.clientX}, ${e.clientY})
-            - ViewerRect: (L:${rect.left.toFixed(1)}, T:${rect.top.toFixed(1)}, W:${rect.width}, H:${rect.height})
-            - Adjusted X/Y: (${x.toFixed(1)}, ${y.toFixed(1)})`);
+            const result = this.viewer.impl.hitTest(x, y, true);
 
-        // [Fix] 3. 보정된 좌표로 Hit Test 실행
-        // 세 번째 인자 true는 투명한 객체를 무시하고 실제 지오메트리를 찾도록 함
-        const result = this.viewer.impl.hitTest(x, y, true);
+            if (result && result.dbId) {
+                console.log(`[Emergency] Hit Success! dbId: ${result.dbId}, Point:`, result.intersectPoint);
 
-        if (result && result.dbId) {
-            console.log(`[IssueManager] Hit Success! dbId: ${result.dbId}, Point:`, result.intersectPoint);
+                // [Emergency] Get Model GUID (getGuid() requested)
+                const modelGuid = (this.viewer.model && this.viewer.model.getGuid) ? this.viewer.model.getGuid() :
+                    (result.model && result.model.getModelGuid ? result.model.getModelGuid() : 'N/A');
+                const dbId = result.dbId;
 
-            // [Fix] 객체를 맞췄다면 즉시 생성 모드 종료
-            this.toggleCreationMode(false);
+                // [Step 1] Create HTML Marker
+                this.removeTempMarker();
+                this.tempIssuePosition = result.intersectPoint.clone();
 
-            // [Markup Flow] Enter Markup Mode before Modal
-            this.enterMarkupMode(result.dbId, result.intersectPoint);
+                const marker = document.createElement('div');
+                marker.id = 'temp-issue-marker-div';
+                marker.className = 'issue-temp-marker';
+                marker.dataset.dbId = dbId;
+                marker.dataset.modelGuid = modelGuid;
 
-            console.log('[IssueManager] Starting async capture for thumbnail...');
-            this.captureIssueThumbnail((base64) => {
-                this.tempThumbnail = base64; // Store temp for markup background
-            });
-        } else {
-            console.log('[IssueManager] Hit Failed: No object at adjusted location.');
-
-            // [Fix] 4. 감도 보조 로직 (주변 5px 범위 내에서 재검색 시도) - 선택 사항이나 안정성 위해 추가
-            let retryResult = null;
-            const offsets = [[-3, 0], [3, 0], [0, -3], [0, 3]];
-            for (let offset of offsets) {
-                retryResult = this.viewer.impl.hitTest(x + offset[0], y + offset[1], true);
-                if (retryResult && retryResult.dbId) {
-                    this.toggleCreationMode(false);
-                    this.enterMarkupMode(retryResult.dbId, retryResult.intersectPoint);
-                    return;
+                if (window.currentIssueStatus === 'Closed') {
+                    marker.classList.add('green');
                 }
-            }
 
-            alert('빈 공간을 클릭했습니다. 모델 위를 클릭해주세요.\n(클릭 위치가 모델의 아주 미세한 경계일 수 있습니다.)');
+                this.viewer.container.appendChild(marker);
+                this.tempIssueMarker = marker;
+
+                // Sync immediately
+                this._onCameraChange();
+
+                // STOP listening for clicks but keep marker
+                this.toggleCreationMode(false);
+
+                // [Markup Flow] Enter Markup Mode
+                this.enterMarkupMode(dbId, result.intersectPoint);
+
+                this.captureIssueThumbnail((base64) => {
+                    this.tempThumbnail = base64;
+                });
+            } else {
+                console.log('[Emergency] Hit Failed: No object found at clicked location.');
+                this.toggleCreationMode(false);
+            }
+        } catch (err) {
+            console.error('[Emergency] Critical error during coordinate capture:', err);
             this.toggleCreationMode(false);
         }
+    }
+
+    _onCameraChange() {
+        this.syncAllMarkers();
+    }
+
+    /**
+     * [Nuclear Reconstruction] Infinite loop to ensure markers are always synced.
+     */
+    _syncLoop() {
+        this.syncAllMarkers();
+        requestAnimationFrame(this._syncLoop);
+    }
+
+    /**
+     * [Nuclear Reconstruction] Central Engine for all marker-to-3D projection sync.
+     * Uses worldPosition as the single Source of Truth.
+     */
+    syncAllMarkers() {
+        // 1. Sync Temporary Marker
+        if (this.tempIssueMarker && this.tempIssuePosition) {
+            const screenPos = this.viewer.worldToClient(this.tempIssuePosition);
+            this.tempIssueMarker.style.left = `${Math.round(screenPos.x)}px`;
+            this.tempIssueMarker.style.top = `${Math.round(screenPos.y)}px`;
+
+            const camera = this.viewer.navigation.getCamera();
+            const dir = new THREE.Vector3().subVectors(this.tempIssuePosition, camera.position).normalize();
+            const cameraDir = camera.getWorldDirection(new THREE.Vector3());
+            const dot = dir.dot(cameraDir);
+            this.tempIssueMarker.style.display = dot > 0 ? 'block' : 'none';
+        }
+
+        // 2. Sync all persistent HTML markers
+        this.htmlMarkersMap.forEach((data) => {
+            const worldPos = data.position;
+            const screenPoint = this.viewer.worldToClient(new THREE.Vector3(worldPos.x, worldPos.y, worldPos.z));
+
+            // [Nuclear Safeguard] Invalid projection detection
+            if (!screenPoint || (screenPoint.x === 0 && screenPoint.y === 0)) {
+                data.element.style.display = 'none';
+                return;
+            }
+
+            // Forced position update (Rounded for sub-pixel stability)
+            data.element.style.left = `${Math.round(screenPoint.x)}px`;
+            data.element.style.top = `${Math.round(screenPoint.y)}px`;
+
+            const camera = this.viewer.navigation.getCamera();
+            const dir = new THREE.Vector3().subVectors(worldPos, camera.position).normalize();
+            const cameraDir = camera.getWorldDirection(new THREE.Vector3());
+            const dot = dir.dot(cameraDir);
+
+            // Visibility & Interaction anchoring
+            data.element.style.display = (dot > 0.05) ? 'block' : 'none';
+            data.element.style.zIndex = 2000;
+        });
+    }
+
+    // Facade for backward compatibility
+    refreshAllMarkers() {
+        this.syncAllMarkers();
+    }
+
+    /**
+     * Updates the position of the temporary creation marker.
+     * @param {THREE.Vector3} [worldPoint] - Optional override for position.
+     */
+    updateTempMarkerPosition(worldPoint) {
+        if (!this.tempIssueMarker) return;
+
+        const pos = worldPoint || this.tempIssuePosition;
+        if (!pos) return;
+
+        const screenPos = this.viewer.worldToClient(pos);
+        this.tempIssueMarker.style.left = `${screenPos.x}px`;
+        this.tempIssueMarker.style.top = `${screenPos.y}px`;
+    }
+
+    removeTempMarker() {
+        if (this.tempIssueMarker) {
+            this.tempIssueMarker.remove();
+            this.tempIssueMarker = null;
+            this.viewer.removeEventListener(Autodesk.Viewing.CAMERA_CHANGE_EVENT, this._onCameraChange);
+        }
+        this.tempIssuePosition = null;
     }
 
     captureIssueThumbnail(callback, markupExt = null) {
@@ -386,6 +558,8 @@ export class IssueManager {
             resolution_description: resolutionDesc || null,
             after_snapshot_url: afterThumbnail || null,
             after_viewpoint: afterViewstate || null,
+            // [Filtering Logic] Capture current model GUID as primary filter key
+            modelGuid: (this.viewer.model && this.viewer.model.getGuid) ? this.viewer.model.getGuid() : null,
             // [Fix] Enforce normalized snake_case keys
             structure_name: structureName.toString().trim(),
             work_type: workType.toString().trim(),
@@ -401,6 +575,7 @@ export class IssueManager {
         this.issues.push(issue);
         this.saveIssues();
         this.createPin(issue);
+        this.removeTempMarker(); // Clear temporary marker after saving
 
         // Auto-exit creation mode
         this.toggleCreationMode(false);
@@ -456,6 +631,9 @@ export class IssueManager {
     async enterMarkupMode(dbId, point, mode = 'create') {
         console.log(`[IssueManager] Entering Markup Mode [${mode}]:`, { dbId, point });
 
+        // [Global Sync] Ensure all markers are aligned before entering markup mode
+        this.refreshAllMarkers();
+
         // Ensure extension is loaded
         this.markupsExt = await this.viewer.loadExtension('Autodesk.Viewing.MarkupsCore');
         this.markupsExt.enterEditMode();
@@ -486,8 +664,8 @@ export class IssueManager {
             </div>
             <div class="markup-style-controls">
                 <label>Size:</label>
-                <input type="range" class="markup-slider" min="1" max="20" step="0.1" value="1">
-                <input type="number" class="markup-num-input" value="1" min="1" max="20" step="0.1">
+                <input type="range" class="markup-slider" min="0.1" max="20" step="0.1" value="1">
+                <input type="number" class="markup-num-input" value="1" min="0.1" max="20" step="0.1">
             </div>
             <button class="markup-finish-btn">작성 완료</button>
         `;
@@ -549,14 +727,52 @@ export class IssueManager {
             };
         });
 
-        // Size Sync
+        // [Nuclear Option] 무한 루프 차단을 위한 상태 잠금(State Locking) 로직
         const slider = toolbar.querySelector('.markup-slider');
         const numInput = toolbar.querySelector('.markup-num-input');
+        let isUpdatingMarkup = false;
+
         const updateSize = (val) => {
-            slider.value = val;
-            numInput.value = val;
-            ext.setStyle({ 'stroke-width': parseFloat(val), 'font-size': parseFloat(val) * 5 });
+            if (isUpdatingMarkup) return; // 상태 잠금 시 즉시 반환
+
+            // 0.1 단위 정밀도 강제 정규화 (부동 소수점 오차 제거)
+            const normalizedVal = Math.round(parseFloat(val) * 10) / 10;
+            if (isNaN(normalizedVal)) return;
+
+            isUpdatingMarkup = true;
+
+            // 엔진 상태 확인 및 비교
+            const currentStyle = ext.getStyle();
+            const currentEngineVal = Math.round(parseFloat(currentStyle['stroke-width'] || 0) * 10) / 10;
+
+            if (normalizedVal !== currentEngineVal) {
+                // 엔진과 값이 다를 때만 업데이트 실행
+                ext.setStyle({
+                    'stroke-width': normalizedVal,
+                    'font-size': normalizedVal * 5
+                });
+            }
+
+            // UI 동기화 (슬라이더 및 숫자 입력창)
+            if (Math.round(parseFloat(slider.value) * 10) / 10 !== normalizedVal) slider.value = normalizedVal;
+            if (Math.round(parseFloat(numInput.value) * 10) / 10 !== normalizedVal) numInput.value = normalizedVal;
+
+            // 50ms 후 잠금 해제 (이벤트 루프 분리)
+            setTimeout(() => { isUpdatingMarkup = false; }, 50);
         };
+
+        // 엔진 이벤트를 UI에 반영할 때도 상태 잠금 확인
+        const onMarkupSelected = () => {
+            if (isUpdatingMarkup) return;
+            const style = ext.getStyle();
+            if (style && style['stroke-width']) {
+                const engineVal = Math.round(parseFloat(style['stroke-width']) * 10) / 10;
+                slider.value = engineVal;
+                numInput.value = engineVal;
+            }
+        };
+        ext.addEventListener(Autodesk.Viewing.Extensions.Markups.Core.EVENT_MARKUP_SELECTED, onMarkupSelected);
+        ext.addEventListener(Autodesk.Viewing.Extensions.Markups.Core.EVENT_EDIT_MODE_CHANGED, onMarkupSelected);
         slider.oninput = (e) => updateSize(e.target.value);
         numInput.oninput = (e) => updateSize(e.target.value);
 
@@ -569,6 +785,8 @@ export class IssueManager {
             await this._captureMarkupScreenshot(svgMarkup);
 
             // [Cleanup] Only after capture is initiated/processed
+            ext.removeEventListener(Autodesk.Viewing.Extensions.Markups.Core.EVENT_MARKUP_SELECTED, onMarkupSelected);
+            ext.removeEventListener(Autodesk.Viewing.Extensions.Markups.Core.EVENT_EDIT_MODE_CHANGED, onMarkupSelected);
             ext.leaveEditMode();
             ext.hide();
             toolbar.remove();
@@ -578,6 +796,9 @@ export class IssueManager {
     async _captureMarkupScreenshot(svgData) {
         const mode = this.markupContext?.mode || 'create';
         console.log(`[IssueManager] Rendering markup screenshot for mode: ${mode}`);
+
+        // [Global Sync] Final alignment before capture
+        this.refreshAllMarkers();
 
         return new Promise((resolve) => {
             this.captureIssueThumbnail((base64) => {
@@ -620,40 +841,134 @@ export class IssueManager {
     }
 
     createPin(issue) {
-        // Simple Sphere as Pin
-        const geom = new THREE.SphereGeometry(0.4, 16, 16);
-        const color = issue.status === 'Open' ? 0xff4444 : 0x44ff44;
-        const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthTest: false });
-        const sphere = new THREE.Mesh(geom, mat);
+        // [Nuclear Step 3] Create HTML-based Marker for Interaction
+        const marker = document.createElement('div');
+        marker.className = 'issue-marker';
+        if (issue.status === 'Closed') marker.classList.add('green');
 
-        sphere.position.copy(issue.point);
-        sphere.userData = { issueId: issue.id };
+        // Source of Truth Data Binding
+        marker.dataset.issueId = issue.id;
+        marker.dataset.worldPos = JSON.stringify(issue.point);
 
-        // 1. 씬 존재 확인 및 생성
-        if (!this.viewer.impl.overlayScenes["issue-markers"]) {
-            this.viewer.impl.createOverlayScene("issue-markers");
-        }
+        // Position Marker Initial Projection
+        const pos = new THREE.Vector3(issue.point.x, issue.point.y, issue.point.z);
+        const screenPoint = this.viewer.worldToClient(pos);
+        marker.style.left = `${screenPoint.x}px`;
+        marker.style.top = `${screenPoint.y}px`;
 
-        // 2. 오버레이에 메쉬 추가 (안전한 방식)
-        this.viewer.impl.addOverlay("issue-markers", sphere);
-        this.pins.push(sphere);
-        this.viewer.impl.invalidate(true);
+        // Click Event: Open Edit Modal
+        marker.onclick = (e) => {
+            e.stopPropagation();
+            console.log(`[IssueManager] Marker clicked! Issue ID: ${issue.id}`);
+            this.showEditModal(issue.id);
+        };
+
+        this.viewer.container.appendChild(marker);
+
+        // Store for camera sync and cleanup
+        this.htmlMarkersMap.set(issue.id, {
+            element: marker,
+            position: pos
+        });
     }
 
     restorePins() {
-        // 3. 안정성 확보: 뷰어 엔진 렌더사이클 대기 (0.2초 지연)
+        // 3. Cleanup existing HTML markers and reconstruct
         setTimeout(() => {
+            // Remove from DOM
+            this.htmlMarkersMap.forEach(data => {
+                if (data.element && data.element.parentNode) {
+                    data.element.parentNode.removeChild(data.element);
+                }
+            });
+            this.htmlMarkersMap.clear();
+
+            // Legend removal (if any legacy pins existed)
             if (this.viewer.impl.hasOverlayScene && this.viewer.impl.hasOverlayScene('issue-markers')) {
                 this.viewer.impl.clearOverlay('issue-markers');
             }
-            this.pins = [];
 
-            // [수정] 버전(itemId) 필터링 제거: 모든 이슈의 핀을 표시
-            console.log(`[IssueManager] Restoring pins for all ${this.issues.length} issues.`);
-            this.issues.forEach(issue => this.createPin(issue));
+            // [Async Guard]
+            let currentModelGuid = null;
+            try { currentModelGuid = (this.viewer.model && this.viewer.model.getGuid) ? this.viewer.model.getGuid() : null; } catch (e) { }
 
-            console.log('[FIX] Sidebar & Overlay issues resolved.');
+            this.issues.forEach(issue => {
+                try {
+                    const rawIssueGuid = issue.modelGuid || issue.modelId || issue.modelUrn || '';
+                    const issueModelId = String(rawIssueGuid).trim().toLowerCase();
+                    const targetModelId = String(currentModelGuid || '').trim().toLowerCase();
+
+                    console.log(`[Diagnostic] Issue: ${issue.id}, Stored: ${rawIssueGuid}, Current: ${currentModelGuid}`);
+
+                    // [Multi-Criteria Filter] Structure AND WorkType
+                    const structureFilter = this.activeStructureFilter;
+                    const workTypeFilter = this.activeWorkTypeFilter;
+
+                    if (structureFilter !== null || workTypeFilter !== null) {
+                        const issueStruct = String(issue.structure_name || issue.structureName || '').trim().toLowerCase();
+                        const issueWork = String(issue.work_type || issue.workType || '').trim().toLowerCase();
+                        const targetStruct = String(structureFilter || '').trim().toLowerCase();
+                        const targetWork = String(workTypeFilter || '').trim().toLowerCase();
+
+                        const structMatch = !structureFilter || (issueStruct && issueStruct === targetStruct);
+                        const workMatch = !workTypeFilter || (issueWork && issueWork === targetWork);
+
+                        if (!structMatch || !workMatch) {
+                            console.log(`[Multi-Criteria] Filtered out issue ${issue.id} (struct:${issueStruct}/${targetStruct}, work:${issueWork}/${targetWork})`);
+                            return;
+                        }
+                    }
+
+                    // [URN Filter] Compare by decoded base URN, version-agnostic
+                    const decodeUrn = (s) => {
+                        try {
+                            // Convert base64url → base64 → decode
+                            return atob(s.replace(/-/g, '+').replace(/_/g, '/'));
+                        } catch (e) {
+                            return s; // Not base64, use as-is
+                        }
+                    };
+                    const baseUrn = (s) => decodeUrn(String(s || '').trim()).split('?')[0].toLowerCase().trim();
+
+                    const currentUrn = String(
+                        (this.viewer.model && this.viewer.model.getData)
+                            ? (this.viewer.model.getData().urn || '') : ''
+                    ).trim();
+                    const storedUrn = String(issue.modelUrn || issue.modelGuid || issue.modelId || '').trim();
+
+                    const currentBase = baseUrn(currentUrn);
+                    const storedBase = baseUrn(storedUrn);
+
+                    console.log(`[URN Filter] Issue ${issue.id} | storedBase: "${storedBase}" | currentBase: "${currentBase}"`);
+
+                    // Match = same file regardless of version; Legacy = no URN stored at all
+                    const isMatch = storedBase && currentBase && (storedBase === currentBase);
+                    const isLegacy = !storedUrn;
+
+                    if (!isMatch && !isLegacy) {
+                        console.warn(`[URN Filter] Skipping issue ${issue.id} — model mismatch`);
+                        return;
+                    }
+
+                    this.createPin(issue);
+                } catch (pinErr) {
+                    console.error(`[Emergency] Failed to render pin for issue ${issue.id}:`, pinErr);
+                }
+            });
         }, 200);
+    }
+
+    /**
+     * [Multi-Criteria Filter] Set the active structure/workType criteria for marker rendering.
+     * Pass null to a field to disable that filter.
+     * @param {string|null} structure - Structure name to filter by (e.g. '101동')
+     * @param {string|null} workType  - Work type to filter by (e.g. '토목')
+     */
+    setMarkerFilter(structure, workType) {
+        this.activeStructureFilter = structure || null;
+        this.activeWorkTypeFilter = workType || null;
+        console.log(`[Multi-Criteria] Filter set → structure: "${structure}", workType: "${workType}"`);
+        this.restorePins(); // Immediately re-render with new filter
     }
 
     renderIssueList() {

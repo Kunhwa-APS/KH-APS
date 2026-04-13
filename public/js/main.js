@@ -589,7 +589,10 @@ function setupIssueModal() {
         console.log('[Main] Closing issue modal and resetting state');
         modal.style.display = 'none';
         resetModal();
-        if (issueManager) issueManager.toggleCreationMode(false);
+        if (issueManager) {
+            issueManager.toggleCreationMode(false);
+            issueManager.removeTempMarker(); // Clear marker if any
+        }
     };
 
     closeBtn.onclick = hide;
@@ -602,8 +605,12 @@ function setupIssueModal() {
         statusSelect.addEventListener('change', (e) => {
             if (e.target.value === 'Closed') {
                 resSection.style.display = 'block';
+                const marker = document.getElementById('temp-issue-marker-div');
+                if (marker) marker.classList.add('green');
             } else {
                 resSection.style.display = 'none';
+                const marker = document.getElementById('temp-issue-marker-div');
+                if (marker) marker.classList.remove('green');
             }
         });
     }
