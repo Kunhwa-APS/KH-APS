@@ -148,6 +148,7 @@ async function callOllama(messages, systemPrompt) {
         throw err;
     }
 }
+
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 async function callAI(messages, systemPrompt) {
     const provider = PROVIDER();
@@ -198,7 +199,7 @@ Provide:
     return callAI([{ role: 'user', content: userMessage }]);
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Public API (Multi-turn Chat) ────────────────────────────────────────────────
 const HarnessBrain = require('./harness-brain');
 
 /**

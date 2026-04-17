@@ -8,7 +8,6 @@ let router = express.Router();
  * ngrok / localhost 환경 모두 자동 대응합니다.
  */
 function getDynamicCallbackUrl(req) {
-    // ngrok이나 다른 프록시 헤더가 있으면 원본 호스트를 사용
     const forwardedHost = req.headers['x-forwarded-host'] || req.headers['x-original-host'];
     const forwardedProto = req.headers['x-forwarded-proto'] || 'http';
 
@@ -16,7 +15,6 @@ function getDynamicCallbackUrl(req) {
         return `${forwardedProto}://${forwardedHost}/api/auth/callback`;
     }
 
-    // 일반 요청인 경우 host 헤더 사용
     const protocol = req.secure ? 'https' : req.headers['x-forwarded-proto'] || 'http';
     const host = req.headers.host;
     return `${protocol}://${host}/api/auth/callback`;
@@ -35,17 +33,14 @@ router.get('/api/auth/login', function (req, res) {
 
 /**
  * GET /api/config/maps
- * Google Maps/VWorld API 키를 프론트엔드에 제공
  */
 router.get('/api/config/maps', function (req, res) {
     const key = process.env.VWORLD_API_KEY || process.env.GOOGLE_MAPS_API_KEY || '';
-    // Placeholder checks removed to avoid 503 errors and breaking frontend UI
     res.json({ apiKey: key });
 });
 
 /**
  * GET /api/debug
- * 현재 OAuth 설정 진단 정보 (개발용)
  */
 router.get('/api/debug', function (req, res) {
     const { APS_CLIENT_ID, APS_CALLBACK_URL } = require('../config.js');
@@ -72,7 +67,6 @@ router.get('/api/debug', function (req, res) {
 
 /**
  * GET /api/auth/logout
- * 세션 삭제 후 메인 페이지로 리다이렉트
  */
 router.get('/api/auth/logout', function (req, res) {
     req.session.destroy((err) => {
@@ -94,7 +88,6 @@ router.get('/api/auth/callback', function (req, res, next) {
 
 /**
  * GET /api/auth/token
- * Viewer용 공개 액세스 토큰 반환
  */
 router.get('/api/auth/token', authRefreshMiddleware, function (req, res) {
     res.json(req.publicOAuthToken);
@@ -102,7 +95,6 @@ router.get('/api/auth/token', authRefreshMiddleware, function (req, res) {
 
 /**
  * GET /api/auth/profile
- * 로그인한 사용자 프로필 정보 반환
  */
 router.get('/api/auth/profile', authRefreshMiddleware, async function (req, res, next) {
     try {

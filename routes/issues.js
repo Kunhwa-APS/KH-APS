@@ -78,11 +78,11 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         });
 
         // 2. Read & compile Handlebars template
-        // 2. Read & compile Handlebars template
         if (issues.length > 0) {
             console.log("PDF 생성 직전 데이터 보정 결과:", JSON.stringify(issues[0], null, 2));
             console.log("서버가 받은 원본 데이터 샘플:", JSON.stringify(issuesRaw[0], null, 2));
         }
+
         const templateData = { title, logoBase64, issues, sf };
         const templatePath = path.join(__dirname, '..', 'views', 'issue-report.hbs');
 

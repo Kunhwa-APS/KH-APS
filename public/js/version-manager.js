@@ -66,7 +66,7 @@ export async function loadVersionsDropdown(hubId, projectId, itemId, currentVers
 
         versions.sort((a, b) => b.vNumber - a.vNumber);
 
-        // [추가] 현재 로드된 URN을 기반으로 활성 버전 식별 (itemId 오참조 방지)
+        // 현재 로드된 URN을 기반으로 활성 버전 식별
         const currentUrn = window.currentUrn;
         console.log('[VersionManager] Identifying active version by URN:', currentUrn);
 
@@ -109,20 +109,20 @@ export async function loadVersionsDropdown(hubId, projectId, itemId, currentVers
 
                 try {
                     if (window._viewer) {
-                        // [추가] 현재 카메라 상태 저장
+                        // 현재 카메라 상태 저장
                         const savedState = window._viewer.getState({ viewport: true });
                         console.log('[VersionManager] Saved camera state before switch.');
 
-                        // [CRITICAL] Clean Unload: Remove all existing models to prevent memory leaks/overlaps
+                        // Clean Unload
                         const models = window._viewer.impl.modelQueue().getModels();
                         console.log(`[VersionManager] Unloading ${models.length} models...`);
                         models.forEach(m => window._viewer.impl.unloadModel(m));
 
-                        // [추가] 신규 모델 로드 완료 시 카메라 상태 복원
+                        // 신규 모델 로드 완료 시 카메라 상태 복원
                         const onGeometryLoaded = () => {
                             window._viewer.removeEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, onGeometryLoaded);
                             console.log('[VersionManager] New model loaded, restoring camera state.');
-                            window._viewer.restoreState(savedState, null, true); // true for immediate apply (or smooth)
+                            window._viewer.restoreState(savedState, null, true);
                         };
                         window._viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, onGeometryLoaded);
 

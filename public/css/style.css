@@ -930,6 +930,11 @@ body {
     color: var(--text-muted);
     font-size: 0.8rem;
     font-style: italic;
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    /* End of block */
 }
 
 .top-bar-btn {
@@ -4741,6 +4746,7 @@ input:checked+.slider:before {
 .issue-creation-active,
 .issue-creation-active * {
     cursor: crosshair !important;
+    /* Issue markers */
 }
 
 /* ── Unread Status ─────────────────────────────────────────── */
@@ -5013,4 +5019,7 @@ input:checked+.slider:before {
     transform: translateX(18px);
     background: #6366f1;
     box-shadow: 0 0 8px rgba(99, 102, 241, 0.7);
+    box-shadow: 0 0 8px rgba(99, 102, 241, 0.7);
+}
+
 }
