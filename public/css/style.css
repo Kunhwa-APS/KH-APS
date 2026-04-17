@@ -796,7 +796,6 @@ body {
     /* Force extra space away from scrollbars/sidebar edges */
 }
 
-
 .top-bar-title {
     font-size: 0.95rem;
     font-weight: 600;
@@ -931,6 +930,10 @@ body {
     color: var(--text-muted);
     font-size: 0.8rem;
     font-style: italic;
+    max-width: 400px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .top-bar-btn {

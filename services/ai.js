@@ -37,9 +37,7 @@ const SYSTEM_PROMPT = `당신은 '건화(Kunhwa)' 사용자의 곁에서 함께 
 - User: "오늘 너무 피로하네..."
 - Assistant: "에구, 오늘 정말 고생 많으셨나 봐요. 잠시 눈을 붙이거나 차 한잔하면서 쉬엄쉬엄 하는 건 어떨까요? 제가 옆에서 든든하게 지켜보고 있을게요!"
 - User: "고마워, 이슈 목록 좀 보여줘"
-- Assistant: "그럼요! 제가 바로 정리해서 가져올게요. 잠시만 기다려 주세요! \`\`\`json {"action": "viewer_command", "command": "export_issues_pdf", "params": {}} \`\`\`"`;
-
-
+- Assistant: "그럼요! 제가 바로 정리해서 가져올게요. 잠시만 기다려 주세요! \`\`\`json {\"action\": \"viewer_command\", \"command\": \"export_issues_pdf\", \"params\": {}} \`\`\`"`;
 
 // ── OpenAI (GPT) ─────────────────────────────────────────────────────────────
 async function callOpenAI(messages, systemPrompt) {
@@ -59,7 +57,7 @@ async function callOpenAI(messages, systemPrompt) {
     const response = await axios.post(
         'https://api.openai.com/v1/chat/completions',
         payload,
-        { headers: { Authorization: `Bearer ${apiKey} `, 'Content-Type': 'application/json' } }
+        { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } }
     );
     return response.data.choices[0].message.content;
 }
@@ -69,7 +67,6 @@ async function callGemini(messages, systemPrompt, retryCount = 0) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new Error('GEMINI_API_KEY not set in .env');
 
-    // Try available models in order of efficiency and likelihood of quota availability
     const availableModels = ['gemini-2.0-flash', 'gemini-flash-latest', 'gemini-pro-latest'];
     const model = availableModels[retryCount] || 'gemini-pro-latest';
 
@@ -77,7 +74,6 @@ async function callGemini(messages, systemPrompt, retryCount = 0) {
 
     console.log(`[AI] Calling Gemini: ${model} (Attempt: ${retryCount + 1})`);
 
-    // Convert OpenAI-style messages to Gemini format
     const contents = messages.map(m => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }]
@@ -101,14 +97,12 @@ async function callGemini(messages, systemPrompt, retryCount = 0) {
         }
         return resultText;
     } catch (err) {
-        // Detailed error logging
         if (err.response) {
             console.error(`[AI] Gemini API Error (${err.response.status}):`, JSON.stringify(err.response.data, null, 2));
         } else {
             console.error('[AI] Gemini Request Error:', err.message);
         }
 
-        // Handle 404 (Model not found) or 429 (Rate Limit) by retrying with fallback
         const isRetryable = err.response?.status === 404 || err.response?.status === 429;
         if (isRetryable && retryCount < 2) {
             const delay = err.response?.status === 429 ? (Math.pow(2, retryCount) * 1000) : 100;
@@ -161,82 +155,33 @@ async function callAI(messages, systemPrompt) {
     throw new Error(`Unknown AI provider: ${provider}. Set AI_PROVIDER=openai, gemini, or ollama`);
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
-/**
- * Analyze model metadata and answer a question
- */
-async function analyzeModel({ modelData, question, context }) {
-    const userMessage = `
-## BIM Model Data
-${modelData ? JSON.stringify(modelData, null, 2) : 'No model data provided'}
-
-## Additional Context
-${context || 'None'}
-
-## Question
-${question}
-`.trim();
-
-    return callAI([{ role: 'user', content: userMessage }]);
-}
-
-/**
- * Summarize selected BIM elements
- */
-async function summarizeElements({ elements, urn }) {
-    const userMessage = `
-Please analyze and summarize the following BIM model elements.
-Model URN: ${urn || 'unknown'}
-
-Selected Elements:
-${JSON.stringify(elements, null, 2)}
-
-Provide:
-1. A brief summary of the selection
-2. Key properties and their values
-3. Any notable observations
-`.trim();
-
-    return callAI([{ role: 'user', content: userMessage }]);
-}
-
-// ── Public API ────────────────────────────────────────────────────────────────
+// ── Public API (Multi-turn Chat) ────────────────────────────────────────────────
 const HarnessBrain = require('./harness-brain');
 
-/**
- * 사용자 메시지가 일상적인 대화(인사, 자기소개 등)인지 판단합니다.
- */
 function isSocialTalk(message) {
     if (!message) return false;
     const socialKeywords = ['안녕', '하이', '반가워', '누구', '기분', '날씨', '고마워', '감사', '잘가'];
     return socialKeywords.some(keyword => message.includes(keyword));
 }
 
-/**
- * Multi-turn chat with optional system context and RAG
- */
 async function chat({ messages, systemContext }) {
     let finalSystemPrompt = SYSTEM_PROMPT;
     const lastUserMessage = messages[messages.length - 1]?.content || "";
 
-    // [Social-Bypass] 일상 대화 감지 시 페르소나 완화
     if (isSocialTalk(lastUserMessage)) {
         finalSystemPrompt += `\n\n## [Social-Bypass Mode]
 사용자가 일상적인 대화를 건넸습니다. 당신은 지금 사용자의 '다정하고 유능한 파트너'예요. 
 - 전문적인 기능 안내나 거절 문구는 잠시 잊고, 친구와 수다를 떨듯 다정하게 대화에만 집중해 주세요.
-- 사용자가 힘들어하거나 지쳐 보이면 진심 어린 응원과 공감을 최우선으로 해 주세요. 
 - 말투는 부드러운 '해요 체'로 유지해 주세요.`;
     }
 
-    // [Harness-Brain] 지식 검색 및 컨텍스트 강화
     try {
         if (lastUserMessage && !lastUserMessage.startsWith('[')) {
             const knowledge = await HarnessBrain.searchKnowledge(lastUserMessage);
             const mockIssues = await HarnessBrain.getProjectIssues('PROJ-123', 'MOCK_TOKEN');
 
             finalSystemPrompt = await HarnessBrain.enrichSystemPrompt(
-                finalSystemPrompt, // Base prompt may already have Social-Bypass instructions
+                finalSystemPrompt,
                 systemContext,
                 mockIssues
             );
@@ -250,4 +195,4 @@ async function chat({ messages, systemContext }) {
     return callAI(messages, finalSystemPrompt);
 }
 
-module.exports = { analyzeModel, summarizeElements, chat };
+module.exports = { analyzeModel: null, summarizeElements: null, chat };

@@ -18,7 +18,7 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         const title = data.title || '이슈 해결 결과 보고서';
         const logoBase64 = data.logoBase64 || '';
 
-        // [Field Selector] Build field visibility flags — use data.selectedFields if available, fallback to data.sf
+        // [Field Selector] Build field visibility flags
         const rawSf = data.selectedFields || data.sf || {};
         const sf = {
             no: rawSf.no !== false && String(rawSf.no) !== 'false',
@@ -29,21 +29,10 @@ router.post('/api/issues/export-pdf', async (req, res) => {
             screenshot: rawSf.screenshot !== false && String(rawSf.screenshot) !== 'false'
         };
 
-        // [Crucial Debug] Write to a file since terminal logs might be missed
-        try {
-            const debugPayload = { timestamp: new Date().toISOString(), sf, issuesCount: issuesRaw.length, titleLength: title.length, hasLogo: !!logoBase64 };
-            fs.writeFileSync(path.join(__dirname, '..', 'pdf_debug.log'), JSON.stringify(debugPayload, null, 2));
-        } catch (e) {
-            console.error('DEBUG_LOG_WRITE_FAILED:', e.message);
-        }
-
-        // [Debug] Log basic request info
-        console.log(`[Issues PDF] Exporting ${issuesRaw.length} issues. Title: ${title}`);
-
         // Pre-compute combined flag for use in HBS
         sf.hasMetaRow = sf.no || sf.structure || sf.work_type;
 
-        // Calculate layout properties for the single-table approach
+        // Calculate layout properties
         let totalColsCount = 0;
         if (sf.no) totalColsCount += 2;
         if (sf.structure) totalColsCount += 2;
@@ -53,19 +42,21 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         sf.totalCols = Math.max(1, totalColsCount);
         sf.halfCols = Math.max(1, Math.floor(totalColsCount / 2));
 
-        console.log('[Issues PDF] selectedFields:', sf);
-
         // Map each raw issue to the template fields
         const issues = issuesRaw.map((issue, idx) => {
-            const valStruct = (issue.structure_name || issue.structureName || issue.structure || '-').toString().trim();
-            const valWork = (issue.work_type || issue.workType || issue.workType || '-').toString().trim();
+            // [Greedy Extraction Strategy]
+            const rawStruct = (issue.structure_name || issue.structureName || issue.structure || issue.struct || issue.Structure || '').toString().trim();
+            const rawWork = (issue.work_type || issue.workType || issue.work_Type || issue.worktype || issue.WorkType || '').toString().trim();
+
+            const valStruct = rawStruct || '-';
+            const valWork = rawWork || '-';
             const valIssueNum = (issue.issue_number || issue.issueNumber || issue.dbId || issue.id || (idx + 1)).toString().trim();
 
             return {
                 issueId: valIssueNum,
                 status: issue.status || 'Open',
-                pdf_structure: valStruct || '-',
-                pdf_work_type: valWork || '-',
+                pdf_structure: valStruct,
+                pdf_work_type: valWork,
                 description: issue.description || '',
                 resolution_description: issue.resolution_description || '',
                 thumbnail: issue.thumbnail || '',
@@ -73,7 +64,6 @@ router.post('/api/issues/export-pdf', async (req, res) => {
             };
         });
 
-        // 2. Read & compile Handlebars template
         const templateData = { title, logoBase64, issues, sf };
         const templatePath = path.join(__dirname, '..', 'views', 'issue-report.hbs');
 
@@ -81,7 +71,7 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         const template = handlebars.compile(templateHtml);
         const html = template(templateData);
 
-        // 3. Launch Puppeteer with generous timeout
+        // [Puppeteer] Generate PDF with generous timeout
         const browser = await puppeteer.launch({
             headless: 'new',
             args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -92,7 +82,6 @@ router.post('/api/issues/export-pdf', async (req, res) => {
 
         await page.setContent(html, { waitUntil: 'networkidle0', timeout: 90000 });
 
-        // 4. Generate PDF (A4 Landscape)
         const pdfBuffer = await page.pdf({
             format: 'A4',
             landscape: true,
@@ -102,7 +91,6 @@ router.post('/api/issues/export-pdf', async (req, res) => {
 
         await browser.close();
 
-        // 5. Build filename & send
         const filename = issues.length === 1
             ? `issue_report_${issuesRaw[0].id || 'export'}.pdf`
             : `issue_report_batch_${Date.now()}.pdf`;
