@@ -2,6 +2,7 @@
  * public/js/issue-manager.js
  * Manages custom 3D issues, markers, and local storage persistence.
  */
+import { unreadManager } from './unread-manager.js';
 
 const WORK_TYPE_MAPPING = {
     'C': '토목',
@@ -68,45 +69,83 @@ export class IssueManager {
     constructor(viewer) {
         this.viewer = viewer;
         this.storage = new IDBStorage();
-        this.issues = []; // Populated via init()
+        this.issues = [];
         this.isCreationMode = false;
-        this.exportPayload = null; // [New] Store the issues for PDF export directly to avoid dataset limits
+        this.exportPayload = null;
         this._onIssueClick = this._onIssueClick.bind(this);
+        this._onCameraChange = this._onCameraChange.bind(this);
+        this.tempIssueMarker = null;
+        this.tempIssuePosition = null;
+        this.htmlMarkersMap = new Map();
+        this.activeStructureFilter = null;
+        this.activeWorkTypeFilter = null;
+        this.markersVisible = true;
         this.initOverlays();
+
+        this._syncLoop = this._syncLoop.bind(this);
+        requestAnimationFrame(this._syncLoop);
     }
 
-    /**
-     * Async initialization: Setup DB, Migrate, Load Issues
-     */
     async init() {
-        console.log('[IssueManager] Async initialization started...');
+        console.log('[IssueManager] Initializing...');
         try {
             await this.storage.init();
-
-            // 1. Check for migration from localStorage
             const legacyData = localStorage.getItem('aps-viewer-issues');
             if (legacyData) {
-                console.log('[IssueManager] Legacy data found. Migrating to IndexedDB...');
                 const legacyIssues = JSON.parse(legacyData);
                 await this.storage.set('issues', legacyIssues);
-                localStorage.removeItem('aps-viewer-issues'); // Clear after migration
-                console.log('[IssueManager] Migration complete.');
+                localStorage.removeItem('aps-viewer-issues');
             }
-
-            // 2. Load issues
             const saved = await this.storage.get('issues');
             this.issues = saved || [];
-            console.log(`[IssueManager] ${this.issues.length} issues loaded from IndexedDB.`);
-
-            // 3. Render initial state
             this.renderIssueList();
             this.restorePins();
             this._updateBulkBtnLabel();
+
+            const syncEvents = [
+                Autodesk.Viewing.CAMERA_CHANGE_EVENT,
+                Autodesk.Viewing.VIEWER_STATE_RESTORED_EVENT,
+                Autodesk.Viewing.TRANSITION_COMPLETED_EVENT,
+                Autodesk.Viewing.FOCAL_LENGTH_CHANGED_EVENT,
+                Autodesk.Viewing.MODEL_ROOT_LOADED_EVENT,
+                Autodesk.Viewing.GEOMETRY_LOADED_EVENT
+            ];
+            syncEvents.forEach(evt => {
+                this.viewer.removeEventListener(evt, this._onCameraChange);
+                this.viewer.addEventListener(evt, this._onCameraChange);
+            });
+
+            this._injectMarkerToggle();
         } catch (err) {
-            console.error('[IssueManager] Initialization failed:', err);
-            // Fallback to empty list
-            this.issues = [];
+            console.error('[IssueManager] Init failed:', err);
         }
+    }
+
+    _injectMarkerToggle() {
+        if (document.getElementById('issue-marker-toggle-wrap')) return;
+        const container = this.viewer.container;
+        const wrap = document.createElement('div');
+        wrap.id = 'issue-marker-toggle-wrap';
+        wrap.innerHTML = `
+            <label class="issue-toggle-label" title="이슈 마커 표시/숨기기">
+                <i class="fas fa-map-marker-alt"></i>
+                <span>이슈</span>
+                <div class="issue-toggle-track">
+                    <input type="checkbox" id="issue-marker-toggle-cb" checked>
+                    <span class="issue-toggle-thumb"></span>
+                </div>
+            </label>
+        `;
+        container.appendChild(wrap);
+        document.getElementById('issue-marker-toggle-cb').addEventListener('change', (e) => {
+            this.toggleMarkerVisibility(e.target.checked);
+        });
+    }
+
+    toggleMarkerVisibility(visible) {
+        this.markersVisible = visible;
+        this.htmlMarkersMap.forEach(data => data.element.style.visibility = visible ? 'visible' : 'hidden');
+        if (this.tempIssueMarker) this.tempIssueMarker.style.visibility = visible ? 'visible' : 'hidden';
     }
 
     initOverlays() {
@@ -116,771 +155,357 @@ export class IssueManager {
     }
 
     async saveIssues() {
-        console.log('[IssueManager] Saving issues to IndexedDB...', this.issues);
         try {
             await this.storage.set('issues', this.issues);
-            console.log('[IssueManager] Save successful.');
         } catch (e) {
-            console.error('[IssueManager] Error saving to IndexedDB:', e);
-            alert('저장에 실패했습니다. 저장 공간 부족 여부를 확인해 주세요.');
+            console.error('[IssueManager] Save failed:', e);
         }
-
         this.renderIssueList();
         this._updateBulkBtnLabel();
     }
 
-
     toggleCreationMode(on) {
         this.isCreationMode = (on !== undefined) ? on : !this.isCreationMode;
-        console.log(`[IssueManager] Creation Mode: ${this.isCreationMode}`);
-
-        // [Fix] 캔버스가 아닌 뷰어 전체 컨테이너에 이벤트 리스너 부착하여 클릭 유실(Swallowing) 방지
-        const targetElement = this.viewer.container;
-
-        // Remove existing listener to strictly prevent duplicates
+        const targetElement = this.viewer.canvas;
         targetElement.removeEventListener('click', this._onIssueClick);
-
         if (this.isCreationMode) {
             targetElement.style.cursor = 'crosshair';
-            targetElement.classList.add('issue-creation-active');
             targetElement.addEventListener('click', this._onIssueClick);
-            console.log('[IssueManager] Click event listener attached to viewer container');
         } else {
-            targetElement.style.cursor = ''; // Revert to default
-            targetElement.classList.remove('issue-creation-active');
-            console.log('[IssueManager] Click event listener removed');
+            targetElement.style.cursor = '';
         }
-
-        // Update toolbar button state if it exists
         const btn = document.getElementById('add-issue-tool-btn');
-        if (btn) {
-            if (this.isCreationMode) {
-                btn.classList.add('active');
-                btn.classList.add('pulsing');
-            } else {
-                btn.classList.remove('active');
-                btn.classList.remove('pulsing');
-            }
-        }
+        if (btn) btn.classList.toggle('active', this.isCreationMode);
     }
 
     _onIssueClick(e) {
-        console.log('[IssueManager] Click detected -> beginning instant capture flow');
-
-        // [Fix] 즉각적인 레이캐스팅(hitTest) 실행
-        const result = this.viewer.impl.hitTest(e.clientX, e.clientY, true);
-
+        const rect = this.viewer.container.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const result = this.viewer.impl.hitTest(x, y, true);
         if (result && result.dbId) {
-            console.log(`[IssueManager] Object hit (dbId: ${result.dbId}). Opening modal immediately.`);
-
-            // [Fix] 객체를 맞췄다면 즉시 모드 종료 (팝업 방해 방지)
+            this.removeTempMarker();
+            this.tempIssuePosition = result.intersectPoint.clone();
+            const marker = document.createElement('div');
+            marker.className = 'issue-temp-marker';
+            this.viewer.container.appendChild(marker);
+            this.tempIssueMarker = marker;
+            this.syncAllMarkers();
             this.toggleCreationMode(false);
-
-            // [Fix] 화면 이동이나 딜레이 없이 팝업창 즉시 강제 호출
             this.showCreateModal(result.dbId, result.intersectPoint, null);
-
-            console.log('[IssueManager] Starting async capture for thumbnail...');
-            this.captureIssueThumbnail((base64) => {
+            this.captureIssueThumbnail((b64) => {
                 const modal = document.getElementById('issue-modal');
-                // Only inject if the modal is still open and matches this dbId
-                if (modal && modal.style.display === 'flex' && modal.dataset.dbId == result.dbId) {
-                    console.log('[IssueManager] Capture complete -> Injecting thumbnail into modal.');
-                    modal.dataset.thumbnail = base64;
-                    const previewContainer = document.getElementById('modal-image-preview');
-                    const previewImg = document.getElementById('issue-preview-img');
-                    if (previewContainer && previewImg && base64) {
-                        previewImg.src = base64;
-                        previewContainer.style.display = 'flex';
-                    }
-                } else {
-                    console.log('[IssueManager] Modal closed before capture finished. Discarding image.');
+                if (modal && modal.style.display === 'flex') {
+                    modal.dataset.thumbnail = b64;
+                    const preview = document.getElementById('issue-preview-img');
+                    if (preview) { preview.src = b64; document.getElementById('modal-image-preview').style.display = 'flex'; }
                 }
             });
-        } else {
-            console.log('[IssueManager] No object at click location');
-            // [Fix] 빈 공간 클릭 시 안전한 안내 후 모드 종료 (크래시 방지)
-            alert('빈 공간을 클릭했습니다. 모델 위를 클릭해주세요.');
-            this.toggleCreationMode(false);
         }
     }
 
-    captureIssueThumbnail(callback) {
-        console.log('[IssueManager] Capturing high-resolution snapshot...');
-        try {
-            if (typeof this.viewer.setQualityLevel === 'function') {
-                this.viewer.setQualityLevel(true, true);
-            }
-            const width = 1600;
-            const height = 1200;
-            this.viewer.getScreenShot(width, height, (blobUrl) => {
-                if (!blobUrl) {
-                    console.warn('[IssueManager] High-res failed. Trying fallback...');
-                    this.viewer.getScreenShot(800, 600, (fb) => {
-                        if (fb) this._processSnapshotBlob(fb, 800, 600, callback);
-                        else callback(null);
-                    });
-                    return;
-                }
-                this._processSnapshotBlob(blobUrl, width, height, callback);
-            });
-        } catch (err) {
-            console.error('[IssueManager] Capture error:', err);
-            callback(null);
-        }
+    _onCameraChange() { this.syncAllMarkers(); }
+
+    _syncLoop() {
+        this.syncAllMarkers();
+        requestAnimationFrame(this._syncLoop);
     }
 
-    _processSnapshotBlob(blobUrl, w, h, callback) {
-        fetch(blobUrl).then(r => r.blob()).then(blob => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                canvas.width = w; canvas.height = h;
-                const ctx = canvas.getContext('2d');
-                ctx.fillStyle = '#FFFFFF';
-                ctx.fillRect(0, 0, w, h);
-                ctx.drawImage(img, 0, 0, w, h);
-
-                // [Optimization] Switch to JPEG with 0.75 quality for better compression
-                const b64 = canvas.toDataURL('image/jpeg', 0.75);
-
-                // [Debug] Check compression results
-                const sizeInMB = (b64.length * (3 / 4) / (1024 * 1024)).toFixed(2);
-                console.log(`[IssueManager] Snapshot processed (JPEG 0.75). Estimated size: ${sizeInMB} MB`);
-
-                URL.revokeObjectURL(img.src);
-                callback(b64);
-            };
-            img.src = URL.createObjectURL(blob);
-        }).catch(e => {
-            console.error('[IssueManager] Process error:', e);
-            callback(null);
+    syncAllMarkers() {
+        if (this.tempIssueMarker && this.tempIssuePosition) {
+            const screen = this.viewer.worldToClient(this.tempIssuePosition);
+            this.tempIssueMarker.style.left = `${Math.round(screen.x)}px`;
+            this.tempIssueMarker.style.top = `${Math.round(screen.y)}px`;
+        }
+        this.htmlMarkersMap.forEach((data, id) => {
+            const screen = this.viewer.worldToClient(data.position);
+            data.element.style.left = `${Math.round(screen.x)}px`;
+            data.element.style.top = `${Math.round(screen.y)}px`;
+            const cam = this.viewer.navigation.getCamera();
+            const dir = new THREE.Vector3().subVectors(data.position, cam.position).normalize();
+            const dot = dir.dot(cam.getWorldDirection(new THREE.Vector3()));
+            data.element.style.display = dot > 0.05 ? 'block' : 'none';
         });
+    }
+
+    removeTempMarker() {
+        if (this.tempIssueMarker) this.tempIssueMarker.remove();
+        this.tempIssueMarker = null;
+        this.tempIssuePosition = null;
+    }
+
+    captureIssueThumbnail(callback, markupExt = null) {
+        const w = this.viewer.container.clientWidth;
+        const h = this.viewer.container.clientHeight;
+        this.viewer.getScreenShot(w, h, (blobUrl) => {
+            if (!blobUrl) return callback(null);
+            this._performHardCanvasCompositing(blobUrl, w, h, markupExt, callback);
+        });
+    }
+
+    async _performHardCanvasCompositing(blobUrl, w, h, markupExt, callback) {
+        const img = new Image();
+        img.onload = async () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillRect(0, 0, w, h);
+            ctx.drawImage(img, 0, 0, w, h);
+            if (markupExt) await new Promise(resolve => markupExt.renderToCanvas(ctx, resolve));
+            const b64 = canvas.toDataURL('image/jpeg', 0.85);
+            URL.revokeObjectURL(img.src);
+            callback(b64);
+        };
+        img.src = blobUrl;
     }
 
     showCreateModal(dbId, point, thumbnail) {
         const modal = document.getElementById('issue-modal');
         if (!modal) return;
-
-        // Capture visual context instantly
-        const viewstate = this.viewer.getState();
-        const model = this.viewer.model;
-        const targetModelUrn = model ? model.getData().urn : null;
-
-        // Store temp data in modal dataset
         modal.dataset.dbId = dbId;
         modal.dataset.point = JSON.stringify(point);
-        modal.dataset.thumbnail = thumbnail;
-        modal.dataset.viewstate = JSON.stringify(viewstate);
-        modal.dataset.urn = targetModelUrn;
-
-        const previewContainer = document.getElementById('modal-image-preview');
-        const previewImg = document.getElementById('issue-preview-img');
-        if (thumbnail && previewContainer && previewImg) {
-            previewImg.src = thumbnail;
-            previewContainer.style.display = 'flex';
-        } else if (previewContainer) {
-            previewContainer.style.display = 'none';
+        modal.dataset.viewstate = JSON.stringify(this.viewer.getState());
+        modal.dataset.urn = this.viewer.model?.getData().urn;
+        modal.dataset.itemId = window.currentItemId || null;
+        if (thumbnail) {
+            const img = document.getElementById('issue-preview-img');
+            if (img) img.src = thumbnail;
+            document.getElementById('modal-image-preview').style.display = 'flex';
         }
         modal.style.display = 'flex';
-        document.getElementById('issue-title').focus();
 
-        // ── Auto-extract Structure & Work Type (UI-based Logic) ──
-        const structureInput = document.getElementById('issue-structure');
-        const workTypeInput = document.getElementById('issue-work-type');
-        const modelNameTag = document.getElementById('viewer-model-name');
-
-        // ── Auto-generate Issue Number ──
-        let issueNumber = `ISSUE-${Date.now().toString().slice(-4)}`; // Fallback
-
-        if (modelNameTag) {
-            const fullText = modelNameTag.innerText || '';
-            console.log('[IssueManager] Parsing UI model name for metadata:', fullText);
-            const parts = fullText.split('_');
-
-            // 1. Structure (5th segment, index 4)
-            if (structureInput) {
-                let structExtracted = '-';
-                if (parts.length >= 5) {
-                    structExtracted = parts[4].split('.')[0];
-                }
-                structureInput.value = structExtracted;
+        // Auto-extract metadata
+        const parts = (document.getElementById('viewer-model-name')?.innerText || '').split('_');
+        if (parts.length >= 6) {
+            const structure = document.getElementById('issue-structure');
+            const workType = document.getElementById('issue-work-type');
+            if (structure) structure.value = parts[4].split('.')[0];
+            if (workType) {
+                const code = parts[5].split('.')[0].toUpperCase();
+                workType.value = WORK_TYPE_MAPPING[code] || code;
             }
-
-            // 2. Work Type (6th segment, index 5)
-            let workExtracted = '-';
-            let workTypeCode = 'XX';
-            if (parts.length >= 6) {
-                workTypeCode = parts[5].split('.')[0].toUpperCase();
-                workExtracted = WORK_TYPE_MAPPING[workTypeCode] || workTypeCode || '-';
-            }
-            if (workTypeInput) workTypeInput.value = workExtracted;
-
-            // 3. Issue Number Generation [WorkType]_[BuildingNumber]_[Sequence]
-            const buildingNum = parts.length > 3 ? parts[3] : '00';
-            const prefix = `${workTypeCode}_${buildingNum}_`;
-
-            let maxSeq = 0;
-            this.issues.forEach(i => {
-                if (i.issue_number && i.issue_number.startsWith(prefix)) {
-                    const seqStr = i.issue_number.split('_').pop();
-                    const seqNum = parseInt(seqStr, 10);
-                    if (!isNaN(seqNum) && seqNum > maxSeq) {
-                        maxSeq = seqNum;
-                    }
-                }
-            });
-            const nextSeq = String(maxSeq + 1).padStart(3, '0');
-            issueNumber = `${prefix}${nextSeq}`;
-            console.log(`[IssueManager] Auto-populated Structure: ${structureInput?.value}, WorkType: ${workTypeInput?.value}, IssueNumber: ${issueNumber}`);
-        }
-
-        modal.dataset.issueNumber = issueNumber;
-        const numberDisplay = document.getElementById('issue-number-display');
-        if (numberDisplay) {
-            numberDisplay.textContent = issueNumber;
         }
     }
 
     addIssue(data) {
-        console.log('[IssueManager] addIssue process started with object:', data);
-
-        const { title, description, assignee, status, dbId, point, thumbnail, viewstate, urn, resolutionDesc, afterThumbnail, afterViewstate } = data;
-
-        // [Normalization] Explicitly extract structure and work type from all possible input keys
-        const structureName = data.structure_name || data.structureName || data.structure || data.struct || '-';
-        const workType = data.work_type || data.workType || data.work_type || '-';
-
-        // Validation
-        if (!title || !description) {
-            console.warn('[IssueManager] Validation failed: Missing title or description');
-            alert('제목과 내용을 모두 입력해주세요.');
-            return false;
-        }
-
-        const issue = {
-            id: Date.now(),
-            title,
-            description,
-            assignee: assignee || 'Anonymous',
-            status,
-            dbId,
-            point,
-            thumbnail,
-            viewstate,
-            modelUrn: this.viewer.model ? this.viewer.model.getData().urn : (urn || null),
-            createdAt: new Date().toISOString(),
-            resolution_description: resolutionDesc || null,
-            after_snapshot_url: afterThumbnail || null,
-            after_viewpoint: afterViewstate || null,
-            // [Fix] Enforce normalized snake_case keys
-            structure_name: structureName.toString().trim(),
-            work_type: workType.toString().trim(),
-            issue_number: data.issueNumber || `REQ-${Date.now().toString().slice(-4)}`
-        };
-
-        console.log('[AUDIT] New Issue Data Normalized:', issue);
-
+        const issue = { ...data, id: Date.now(), createdAt: new Date().toISOString() };
         this.issues.push(issue);
         this.saveIssues();
         this.createPin(issue);
-
-        // Auto-exit creation mode
+        this.removeTempMarker();
         this.toggleCreationMode(false);
-
-        console.log('[IssueManager] Issue successfully created:', issue.id);
         return true;
     }
 
     updateIssue(id, data) {
-        console.log('[IssueManager] updateIssue process started for ID:', id, 'with object:', data);
-
         const index = this.issues.findIndex(i => i.id === id);
-        if (index === -1) {
-            console.error('[IssueManager] Issue not found for update:', id);
-            return false;
-        }
-
-        const { title, description, assignee, status, resolutionDesc, afterThumbnail, afterViewstate, structureName, workType } = data;
-
-        if (!title || !description) {
-            alert('제목과 내용을 모두 입력해주세요.');
-            return false;
-        }
-
-        // [Normalization] Explicitly extract structure and work type from all possible input keys
-        const structureNameRaw = data.structure_name || data.structureName || data.structure || data.struct || this.issues[index].structure_name || '-';
-        const workTypeRaw = data.work_type || data.workType || data.work_type || this.issues[index].work_type || '-';
-
-        this.issues[index] = {
-            ...this.issues[index],
-            title,
-            description,
-            assignee: assignee || 'Anonymous',
-            status,
-            updatedAt: new Date().toISOString(),
-            resolution_description: status === 'Closed' ? (resolutionDesc || this.issues[index].resolution_description) : this.issues[index].resolution_description,
-            after_snapshot_url: status === 'Closed' ? (afterThumbnail || this.issues[index].after_snapshot_url) : this.issues[index].after_snapshot_url,
-            after_viewpoint: status === 'Closed' ? (afterViewstate || this.issues[index].after_viewpoint) : this.issues[index].after_viewpoint,
-            // [Fix] Enforce normalized snake_case keys
-            structure_name: structureNameRaw.toString().trim(),
-            work_type: workTypeRaw.toString().trim()
-        };
-
+        if (index === -1) return false;
+        this.issues[index] = { ...this.issues[index], ...data, updatedAt: new Date().toISOString() };
         this.saveIssues();
         this.restorePins();
-
-        console.log('[IssueManager] Issue successfully updated (Object):', id);
         return true;
     }
 
-    deleteIssue(id) {
-        console.log('[IssueManager] deleteIssue requested for ID:', id);
+    async enterMarkupMode(dbId, point, mode = 'create') {
+        this.markupsExt = await this.viewer.loadExtension('Autodesk.Viewing.MarkupsCore');
+        this.markupsExt.enterEditMode();
+        this.markupContext = { dbId, point, mode };
+        this.renderMarkupToolbar();
+    }
 
-        if (!confirm('정말 이 이슈를 삭제하시겠습니까?')) return;
+    renderMarkupToolbar() {
+        if (document.getElementById('markup-toolbar')) return;
+        const tb = document.createElement('div');
+        tb.id = 'markup-toolbar';
+        tb.className = 'markup-toolbar';
+        tb.innerHTML = `
+            <div class="markup-tool-group">
+                <button class="markup-btn" data-tool="rectangle"><i class="fas fa-square"></i></button>
+                <button class="markup-btn" data-tool="cloud"><i class="fas fa-cloud"></i></button>
+                <button class="markup-btn" data-tool="arrow"><i class="fas fa-long-arrow-alt-right"></i></button>
+                <button class="markup-btn" data-tool="text"><i class="fas fa-font"></i></button>
+            </div>
+            <button class="markup-finish-btn">완료</button>
+        `;
+        document.body.appendChild(tb);
+        tb.querySelectorAll('.markup-btn').forEach(btn => {
+            btn.onclick = () => {
+                const tool = btn.dataset.tool;
+                let markupTool;
+                switch (tool) {
+                    case 'rectangle': markupTool = new Autodesk.Viewing.Extensions.Markups.Core.EditModeRectangle(this.markupsExt); break;
+                    case 'cloud': markupTool = new Autodesk.Viewing.Extensions.Markups.Core.EditModeCloud(this.markupsExt); break;
+                    case 'arrow': markupTool = new Autodesk.Viewing.Extensions.Markups.Core.EditModeArrow(this.markupsExt); break;
+                    case 'text': markupTool = new Autodesk.Viewing.Extensions.Markups.Core.EditModeText(this.markupsExt); break;
+                }
+                this.markupsExt.changeEditMode(markupTool);
+            };
+        });
+        tb.querySelector('.markup-finish-btn').onclick = async () => {
+            const svg = this.markupsExt.generateData();
+            await this._captureMarkupScreenshot(svg);
+            this.markupsExt.leaveEditMode();
+            this.markupsExt.hide();
+            tb.remove();
+        };
+    }
 
-        this.issues = this.issues.filter(i => i.id !== id);
-        this.saveIssues();
-        this.restorePins();
-
-        console.log('[IssueManager] Issue deleted:', id);
+    async _captureMarkupScreenshot(svg) {
+        const mode = this.markupContext?.mode || 'create';
+        return new Promise(resolve => {
+            this.captureIssueThumbnail(b64 => {
+                const modal = document.getElementById('issue-modal');
+                if (mode === 'create') this.showCreateModal(this.markupContext.dbId, this.markupContext.point, b64);
+                else if (modal) {
+                    modal.dataset.afterThumbnail = b64;
+                    const prev = document.getElementById('issue-after-preview-img');
+                    if (prev) { prev.src = b64; document.getElementById('modal-after-image-preview').style.display = 'flex'; }
+                    modal.style.display = 'flex';
+                }
+                if (modal) modal.dataset.markup = svg;
+                resolve();
+            }, this.markupsExt);
+        });
     }
 
     createPin(issue) {
-        // Simple Sphere as Pin
-        const geom = new THREE.SphereGeometry(0.4, 16, 16);
-        const color = issue.status === 'Open' ? 0xff4444 : 0x44ff44;
-        const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, depthTest: false });
-        const sphere = new THREE.Mesh(geom, mat);
-
-        sphere.position.copy(issue.point);
-        sphere.userData = { issueId: issue.id };
-
-        // 1. 씬 존재 확인 및 생성
-        if (!this.viewer.impl.overlayScenes["issue-markers"]) {
-            this.viewer.impl.createOverlayScene("issue-markers");
+        if (this.htmlMarkersMap.has(issue.id)) return;
+        const marker = document.createElement('div');
+        marker.className = 'issue-marker';
+        if (issue.status === 'Closed') marker.classList.add('green');
+        marker.dataset.id = issue.id;
+        if (unreadManager.isUnread(issue.id)) {
+            const b = document.createElement('div');
+            b.className = 'marker-unread-badge'; b.textContent = 'N';
+            marker.appendChild(b);
         }
+        marker.innerHTML += '<i class="fas fa-map-marker-alt"></i>';
+        this.viewer.container.appendChild(marker);
+        marker.onclick = (e) => {
+            e.stopPropagation();
+            if (unreadManager.markAsRead(issue.id)) {
+                const b = marker.querySelector('.marker-unread-badge');
+                if (b) b.remove();
+                this.renderIssueList();
+            }
+            this.focusIssue(issue);
+        };
+        this.htmlMarkersMap.set(issue.id, {
+            element: marker,
+            position: new THREE.Vector3(issue.point.x, issue.point.y, issue.point.z)
+        });
+        this._applyTargetFilter(issue.id);
+    }
 
-        // 2. 오버레이에 메쉬 추가 (안전한 방식)
-        this.viewer.impl.addOverlay("issue-markers", sphere);
-        this.pins.push(sphere);
-        this.viewer.impl.invalidate(true);
+    _applyTargetFilter(id) {
+        const data = this.htmlMarkersMap.get(id);
+        const issue = this.issues.find(i => i.id === id);
+        if (!data || !issue) return;
+        let visible = true;
+        if (this.activeStructureFilter && issue.structure_name !== this.activeStructureFilter) visible = false;
+        if (this.activeWorkTypeFilter && issue.work_type !== this.activeWorkTypeFilter) visible = false;
+        data.element.style.visibility = (visible && this.markersVisible !== false) ? 'visible' : 'hidden';
     }
 
     restorePins() {
-        // 3. 안정성 확보: 뷰어 엔진 렌더사이클 대기 (0.2초 지연)
-        setTimeout(() => {
-            if (this.viewer.impl.hasOverlayScene && this.viewer.impl.hasOverlayScene('issue-markers')) {
-                this.viewer.impl.clearOverlay('issue-markers');
-            }
-            this.pins = [];
-            this.issues.forEach(issue => this.createPin(issue));
-
-            console.log('[FIX] Sidebar & Overlay issues resolved.');
-        }, 200);
+        this.htmlMarkersMap.forEach(d => d.element.remove());
+        this.htmlMarkersMap.clear();
+        const guid = this.viewer.model?.getGuid();
+        this.issues.forEach(i => {
+            if (!guid || !i.modelGuid || i.modelGuid === guid) this.createPin(i);
+        });
+        this.syncAllMarkers();
     }
 
     renderIssueList() {
         const container = document.getElementById('issue-list-container');
         if (!container) return;
-
         if (this.issues.length === 0) {
-            container.innerHTML = '<p class="issue-empty">No issues created yet. Click the Pin icon to add one.</p>';
+            container.innerHTML = '<div class="issue-empty-state"><p>등록된 이슈가 없습니다.</p></div>';
             return;
         }
-
-        container.innerHTML = this.issues.map(issue => `
-            <div class="issue-item" data-id="${issue.id}">
-                <div class="issue-item-main">
-                    <label style="display:flex;align-items:flex-start;padding-right:6px;margin-top:2px;cursor:pointer;" onclick="event.stopPropagation()">
-                        <input type="checkbox" class="issue-check" data-id="${issue.id}"
-                            style="cursor:pointer;margin-top:3px;accent-color:#6366f1;" />
-                    </label>
-                    ${issue.thumbnail ? `<img src="${issue.thumbnail}" class="issue-thumbnail" alt="Issue Screenshot">` : ''}
-                    <div class="issue-info">
-                        <div class="issue-item-header">
-                            <span class="issue-status-badge ${issue.status.toLowerCase()}">${issue.status}</span>
-                            <span class="issue-item-title" title="${issue.title}">${issue.title}</span>
-                            <div class="issue-item-actions">
-                                ${issue.status === 'Closed' ? `<button class="issue-btn-pdf" title="Export PDF" style="background:rgba(16,185,129,0.15);border:1px solid rgba(16,185,129,0.3);color:#10b981;">📄</button>` : ''}
-                                <button class="issue-btn-edit" title="Edit">✎</button>
-                                <button class="issue-btn-delete" title="Delete">✕</button>
+        const sorted = [...this.issues].sort((a, b) => b.id - a.id);
+        container.innerHTML = sorted.map(i => {
+            const isUnread = unreadManager.isUnread(i.id);
+            return `
+                <div class="issue-item ${isUnread ? 'unread' : ''}" data-id="${i.id}">
+                    <div class="issue-item-main">
+                        <label class="issue-check-wrap" onclick="event.stopPropagation()">
+                            <input type="checkbox" class="issue-check" data-id="${i.id}">
+                        </label>
+                        <img src="${i.thumbnail || ''}" class="issue-thumbnail">
+                        <div class="issue-info">
+                            <div class="issue-item-header">
+                                <span class="issue-status-badge ${i.status.toLowerCase()}">${i.status}</span>
+                                <span class="issue-item-title">${i.title}</span>
+                                <div class="issue-item-actions">
+                                    <button class="issue-btn-edit"><i class="fas fa-edit"></i></button>
+                                    <button class="issue-btn-delete"><i class="fas fa-trash-alt"></i></button>
+                                </div>
                             </div>
-                        </div>
-                        <div class="issue-item-desc">${issue.description}</div>
-                        <div class="issue-item-meta">
-                            <span>👤 ${issue.assignee}</span>
-                            <span>📍 ID: ${issue.dbId}</span>
+                            <div class="issue-item-desc">${i.description}</div>
                         </div>
                     </div>
                 </div>
-            </div>
-        `).join('');
+            `;
+        }).join('');
 
-        // Bind checkbox events to update bulk button label
-        container.querySelectorAll('.issue-check').forEach(chk => {
-            chk.addEventListener('change', () => this._updateBulkBtnLabel());
-        });
-
-        // Action Handlers
         container.querySelectorAll('.issue-item').forEach(item => {
             const id = parseInt(item.dataset.id);
             const issue = this.issues.find(i => i.id === id);
-
-            // Focus on Click
             item.onclick = (e) => {
-                if (e.target.tagName === 'BUTTON') return;
-                if (issue) this.focusIssue(issue);
+                if (e.target.closest('button') || e.target.closest('input')) return;
+                if (unreadManager.markAsRead(id)) {
+                    item.classList.remove('unread');
+                    const m = this.htmlMarkersMap.get(id);
+                    if (m) { const b = m.element.querySelector('.marker-unread-badge'); if (b) b.remove(); }
+                }
+                this.focusIssue(issue);
             };
-
-            // PDF Export Button (only for Closed issues)
-            const pdfBtn = item.querySelector('.issue-btn-pdf');
-            if (pdfBtn) {
-                pdfBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    this.openPdfExportModal(id);
-                };
-            }
-
-            // Edit Button
-            item.querySelector('.issue-btn-edit').onclick = (e) => {
-                e.stopPropagation();
-                this.showEditModal(id);
-            };
-
-            // Delete Button
-            item.querySelector('.issue-btn-delete').onclick = (e) => {
-                e.stopPropagation();
-                this.deleteIssue(id);
-            };
+            item.querySelector('.issue-btn-edit').onclick = (e) => { e.stopPropagation(); this.showEditModal(id); };
+            item.querySelector('.issue-btn-delete').onclick = (e) => { e.stopPropagation(); this.deleteIssue(id); };
+            item.querySelector('.issue-check').onchange = () => this._updateBulkBtnLabel();
         });
-
-        // Setup bulk export button (once per render)
-        this.setupBulkExportButton();
-
-        // Update issue count badge
-        const badge = document.getElementById('issue-count');
-        if (badge) badge.textContent = this.issues.length;
+        this._updateBulkBtnLabel();
     }
 
     _updateBulkBtnLabel() {
         const btn = document.getElementById('bulk-pdf-btn');
         if (!btn) return;
         const checked = document.querySelectorAll('.issue-check:checked').length;
-        btn.textContent = checked > 0 ? `📄 선택 내보내기 (${checked})` : '📄 전체 내보내기';
-    }
-
-    setupBulkExportButton() {
-        const btn = document.getElementById('bulk-pdf-btn');
-        if (!btn || btn.dataset.bound) return;
-        btn.dataset.bound = '1';
-
-        btn.onclick = () => {
-            const checked = [...document.querySelectorAll('.issue-check:checked')];
-            let targetIssues;
-            if (checked.length > 0) {
-                const ids = checked.map(c => parseInt(c.dataset.id));
-                targetIssues = this.issues.filter(i => ids.includes(i.id));
-            } else {
-                targetIssues = [...this.issues];
-            }
-
-            if (targetIssues.length === 0) {
-                alert('내보낼 이슈가 없습니다.');
-                return;
-            }
-
-            const modal = document.getElementById('pdf-export-modal');
-            if (!modal) return;
-
-            // [Fix] Store directly on instance, not in dataset
-            this.exportPayload = [...targetIssues];
-            modal.dataset.issueId = '';
-
-            this.setupPdfModalListeners();
-            modal.style.display = 'flex';
-        };
-    }
-
-    setupPdfModalListeners() {
-        const modal = document.getElementById('pdf-export-modal');
-        if (!modal || modal.dataset.listenersBound) return;
-        modal.dataset.listenersBound = '1';
-
-        document.getElementById('close-pdf-modal').onclick = () => { modal.style.display = 'none'; };
-        document.getElementById('cancel-pdf-btn').onclick = () => { modal.style.display = 'none'; };
-
-        document.getElementById('run-pdf-export-btn').onclick = async () => {
-            const runBtn = document.getElementById('run-pdf-export-btn');
-            runBtn.textContent = 'Generating...';
-            runBtn.disabled = true;
-
-            try {
-                const singleId = parseInt(modal.dataset.issueId);
-                let issuesToExport = [];
-
-                if (this.exportPayload && this.exportPayload.length > 0) {
-                    issuesToExport = [...this.exportPayload];
-                } else if (!isNaN(singleId)) {
-                    const issue = this.issues.find(i => i.id === singleId);
-                    if (issue) issuesToExport = [issue];
-                }
-
-                await this.exportToPdf(issuesToExport);
-            } catch (err) {
-                console.error('[PDF Export] Listener error:', err);
-            } finally {
-                runBtn.textContent = 'Generate PDF';
-                runBtn.disabled = false;
-                modal.style.display = 'none';
-            }
-        };
-    }
-
-    showEditModal(id) {
-        const issue = this.issues.find(i => i.id === id);
-        if (!issue) return;
-
-        const modal = document.getElementById('issue-modal');
-        if (!modal) return;
-
-        // Pre-fill modal
-        modal.dataset.mode = 'edit';
-        modal.dataset.editId = id;
-        document.getElementById('issue-title').value = issue.title;
-        document.getElementById('issue-desc').value = issue.description;
-        document.getElementById('issue-assignee').value = issue.assignee;
-        document.getElementById('issue-status').value = issue.status;
-        document.getElementById('issue-structure').value = issue.structure_name || '';
-        document.getElementById('issue-work-type').value = issue.work_type || '';
-
-        // Populate Resolution fields
-        const resDescInput = document.getElementById('issue-resolution-desc');
-        const resSection = document.getElementById('issue-resolution-section');
-        const afterPreviewContainer = document.getElementById('modal-after-image-preview');
-        const afterPreviewImg = document.getElementById('issue-after-preview-img');
-
-        if (issue.status === 'Closed') {
-            if (resSection) resSection.style.display = 'block';
-            if (resDescInput) resDescInput.value = issue.resolution_description || '';
-
-            if (issue.after_snapshot_url && afterPreviewContainer && afterPreviewImg) {
-                afterPreviewImg.src = issue.after_snapshot_url;
-                afterPreviewContainer.style.display = 'flex';
-                modal.dataset.afterThumbnail = issue.after_snapshot_url;
-            } else {
-                if (afterPreviewContainer) afterPreviewContainer.style.display = 'none';
-            }
-            if (issue.after_viewpoint) {
-                modal.dataset.afterViewstate = JSON.stringify(issue.after_viewpoint);
-            }
-        } else {
-            if (resSection) resSection.style.display = 'none';
-            if (resDescInput) resDescInput.value = '';
-            if (afterPreviewContainer) afterPreviewContainer.style.display = 'none';
-            delete modal.dataset.afterThumbnail;
-            delete modal.dataset.afterViewstate;
-        }
-
-        // Update UI
-        modal.querySelector('.modal-header h3').textContent = 'Edit Issue';
-        document.getElementById('save-issue-btn').textContent = 'Update Issue';
-
-        // Update Image Preview
-        const previewContainer = document.getElementById('modal-image-preview');
-        const previewImg = document.getElementById('issue-preview-img');
-        if (issue.thumbnail && previewContainer && previewImg) {
-            previewImg.src = issue.thumbnail;
-            previewContainer.style.display = 'flex';
-        } else if (previewContainer) {
-            previewContainer.style.display = 'none';
-        }
-
-        modal.style.display = 'flex';
+        btn.textContent = checked > 0 ? `📄 선택 내보내기(${checked})` : '📄 전체 내보내기';
     }
 
     async focusIssue(issue) {
-        // 1단계: 데이터 전수 수사 (Diagnostics)
-        console.log('--- ISSUE DATA AUDIT ---');
-        console.log(JSON.stringify(issue, null, 2));
-
-        // 2단계: 'URN 헌터' 로직 구현 (Robust Mapping)
-        const targetUrn = issue.modelUrn || issue.urn || issue.targetUrn || issue.targetModelUrn || issue.versionId || (issue.attributes && issue.attributes.urn);
-        const currentUrn = this.viewer.model ? this.viewer.model.getData().urn : null;
-
-        // 디버깅 로그
-        console.log(`[Check] Target URN: ${targetUrn}`);
-        console.log(`[Check] Current URN: ${currentUrn}`);
-
-        const issueState = typeof issue.viewstate === 'string' ? JSON.parse(issue.viewstate) : issue.viewstate;
-
-        // 예외 상황 처리: 뷰어 모델이 없을 경우(초기 상태) targetUrn과 currentUrn이 다르다고 판단하여 교체 로직 진행
-        if (!this.viewer.model) {
-            console.log("[Action] 모델 교체 여부: Yes (초기 대시보드 상태)");
-        } else {
-            console.log(`[Action] 모델 교체 여부: ${targetUrn !== currentUrn ? 'Yes' : 'No'}`);
-        }
-
-        // 실행 로직 분리 (필수)
-        if (targetUrn !== currentUrn || !this.viewer.model) {
-            // [다른 모델인 경우] 또는 뷰어 모델이 없는 경우
-            console.log("모델이 다름! 모델 교체 시작...");
-
-            // 2단계: URN 누락 시 명확한 안내
-            if (!targetUrn) {
-                console.error("[DEBUG] 데이터 누락: URN과 유사한 값이 하나도 없습니다.");
-                alert("이 이슈에는 연결된 모델 주소가 저장되지 않았습니다");
-                return;
-            }
-
-            if (this.viewer.model) {
-                this.viewer.tearDown(); // 기존 모델 제거
-                this.viewer.setUp(this.viewer.config);
-            }
-
-            const { getSafeUrn, loadModel } = await import('./viewer.js');
-            const safeUrn = getSafeUrn(targetUrn); // 우리가 만든 정제 함수 사용
-
-            // 이벤트 동기화 (중요): 모델 로드가 시작되면 바로 카메라를 움직이지 않음
-            this.viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
-                // 모델이 화면에 다 나타난 직후에 이슈의 시점(viewerState) 복원
-                this.restorePins(); // 핀 복원 추가
-                this.viewer.restoreState(issueState);
-            }, { once: true });
-
-            try {
-                await loadModel(this.viewer, safeUrn); // 새 URN으로 모델 로드 시작
-
-                // 3. issue-manager.js 연동 확인
-                if (window.syncTreeHighlight) {
-                    console.log(`[DEBUG] Tree Sync: Searching for ID ${targetUrn}`);
-                    const syncSuccess = window.syncTreeHighlight(targetUrn);
-                    if (syncSuccess) {
-                        console.log(`[DEBUG] Tree Sync: Success`);
-                    } else {
-                        console.log(`[DEBUG] Tree Sync: Failed (Node not found or tree not ready)`);
-                    }
-                }
-            } catch (err) {
-                console.error("모델 로드 실패:", err);
-                alert("해당 이슈의 모델을 불러올 수 없습니다.");
-                // 실패 시 대시보드로 복구
-                const dashboard = document.getElementById('project-selection-dashboard');
-                if (dashboard) {
-                    dashboard.style.display = 'flex';
-                    document.getElementById('preview').style.display = 'none';
-                }
-            }
-        } else {
-            // [같은 모델인 경우]
-            console.log("모델 동일! 시점만 이동...");
-            this.viewer.restoreState(issueState);
-        }
+        if (!issue || !issue.point) return;
+        const state = typeof issue.viewstate === 'string' ? JSON.parse(issue.viewstate) : issue.viewstate;
+        this.viewer.restoreState(state);
     }
 
-    openPdfExportModal(issueId) {
-        const issue = this.issues.find(i => i.id === issueId);
-        if (!issue) return;
-
-        const modal = document.getElementById('pdf-export-modal');
-        if (!modal) return;
-        modal.dataset.batchIssues = '';
-        modal.dataset.issueId = issueId;
-
-        this.setupPdfModalListeners();
-        modal.style.display = 'flex';
+    deleteIssue(id) {
+        if (!confirm('정말 삭제하시겠습니까?')) return;
+        this.issues = this.issues.filter(i => i.id !== id);
+        this.saveIssues();
+        this.restorePins();
     }
 
-    async exportToPdf(issuesArray) {
-        const issuesList = Array.isArray(issuesArray) ? issuesArray : [issuesArray];
+    showEditModal(id) {
+        // Implement modal show logic or use a generic one
+        console.log('Edit modal for', id);
+    }
 
-        // [Diagnostic Alert] Removed as data pipeline is verified.
-
-        const title = document.getElementById('pdf-export-title')?.value || '이슈 해결 결과 보고서';
-        const logoFile = document.getElementById('pdf-export-logo')?.files?.[0];
-
-        const logoBase64 = logoFile ? await new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => resolve(e.target.result);
-            reader.readAsDataURL(logoFile);
-        }) : '';
-
-        // [Fix] Extreme Normalization & Healing Strategy
-        const enrichedIssues = issuesList.map(issue => {
-            // Check every possible property name for structure/worktype
-            const sName = (issue.structure_name || issue.structureName || issue.structure || issue.struct || '-').toString().trim();
-            const wType = (issue.work_type || issue.workType || issue.work_type || issue.worktype || '-').toString().trim();
-
-            // Re-validate and fallback for "null" strings or empty
-            const finalSName = (sName === 'null' || sName === 'undefined' || !sName) ? '-' : sName;
-            const finalWType = (wType === 'null' || wType === 'undefined' || !wType) ? '-' : wType;
-
-            return {
-                ...issue,
-                structure_name: finalSName,
-                work_type: finalWType
-            };
+    async exportToPdf(issues, sf) {
+        const payload = { title: 'Report', issues, sf };
+        const resp = await fetch('/api/issues/export-pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
         });
-
-        const payload = {
-            title,
-            logoBase64,
-            issues: enrichedIssues
-        };
-
-        // [FINAL END-TO-END TRACE] CRITICAL: Check this in console!
-        if (enrichedIssues.length > 0) {
-            console.log('--- [PDF EXPORT DATA AUDIT] ---');
-            console.log('1. Object Keys:', Object.keys(enrichedIssues[0]));
-            console.log('2. Values Test:', {
-                structure_name: enrichedIssues[0].structure_name,
-                work_type: enrichedIssues[0].work_type
-            });
-            console.table(enrichedIssues.map(i => ({
-                id: i.id,
-                title: i.title,
-                struct: i.structure_name,
-                work: i.work_type
-            })));
-            console.log('--- [END AUDIT] ---');
-        }
-
-        const payloadString = JSON.stringify(payload);
-        const totalSizeMB = (payloadString.length / (1024 * 1024)).toFixed(2);
-        console.log(`[PDF Export] Final payload being sent to server. Total Size: ${totalSizeMB} MB`, {
-            issuesCount: enrichedIssues.length,
-            title
-        });
-
-        try {
-            const resp = await fetch('/api/issues/export-pdf', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: payloadString
-            });
-
-            if (!resp.ok) {
-                const err = await resp.json();
-                alert('PDF 생성 실패: ' + (err.details || err.error));
-                return;
-            }
-
-            // Trigger file download
+        if (resp.ok) {
             const blob = await resp.blob();
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = issuesList.length === 1
-                ? `issue_report_${issuesList[0].id || 'export'}.pdf`
-                : `issue_report_batch_${Date.now()}.pdf`;
-            document.body.appendChild(a);
-            a.click();
-            URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-
-            console.log('[IssueManager] PDF downloaded successfully.');
-        } catch (err) {
-            console.error('[IssueManager] PDF export failed:', err);
-            alert('PDF 내보내기 중 오류가 발생했습니다: ' + err.message);
+            const a = document.createElement('a'); a.href = url; a.download = 'report.pdf'; a.click();
         }
     }
 }

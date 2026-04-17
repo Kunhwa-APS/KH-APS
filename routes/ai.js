@@ -4,8 +4,7 @@ const express = require('express');
 const router = express.Router();
 const aiService = require('../services/ai');
 
-// ── POST /api/ai/analyze  → Analyze model metadata ─────────────────────────
-// Body: { modelData: {...}, question: "..." }
+// ── POST /api/ai/analyze  → Analyze model metadata
 router.post('/analyze', async (req, res, next) => {
     try {
         const { modelData, question, context } = req.body;
@@ -20,8 +19,7 @@ router.post('/analyze', async (req, res, next) => {
     }
 });
 
-// ── POST /api/ai/summarize  → Summarize selected elements ──────────────────
-// Body: { elements: [...], urn: "..." }
+// ── POST /api/ai/summarize  → Summarize selected elements
 router.post('/summarize', async (req, res, next) => {
     try {
         const { elements, urn } = req.body;
@@ -36,8 +34,7 @@ router.post('/summarize', async (req, res, next) => {
     }
 });
 
-// ── POST /api/ai/chat  → Multi-turn conversation ────────────────────────────
-// Body: { messages: [{role, content}], systemContext: "..." }
+// ── POST /api/ai/chat  → Multi-turn conversation
 router.post('/chat', async (req, res, next) => {
     try {
         const { messages, systemContext } = req.body;
@@ -52,12 +49,17 @@ router.post('/chat', async (req, res, next) => {
     }
 });
 
-// ── GET /api/ai/provider  → currently configured provider ──────────────────
+// ── GET /api/ai/provider  → currently configured provider
 router.get('/provider', (req, res) => {
     res.json({
         provider: process.env.AI_PROVIDER || 'not configured',
         hasOpenAI: !!process.env.OPENAI_API_KEY,
-        hasGemini: !!process.env.GEMINI_API_KEY
+        hasGemini: !!process.env.GEMINI_API_KEY,
+        ollama: {
+            configured: !!process.env.OLLAMA_HOST,
+            host: process.env.OLLAMA_HOST || 'http://localhost:11434',
+            model: process.env.OLLAMA_MODEL || 'llama3'
+        }
     });
 });
 

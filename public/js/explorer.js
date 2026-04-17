@@ -2,6 +2,7 @@
  * explorer.js
  * Manages the folder-based table view within the main viewer area.
  */
+import { unreadManager } from './unread-manager.js';
 
 class FolderExplorer {
     constructor() {
@@ -48,9 +49,22 @@ class FolderExplorer {
         this.renderLoading();
 
         try {
-            const url = `/api/hubs/${hubId}/projects/${projectId}/contents?folder_id=${folderId}`;
+            const url = `/api/hubs/${hubId}/projects/${projectId}/contents${folderId ? `?folder_id=${folderId}` : ''}`;
             const response = await fetch(url);
+
+            if (!response.ok) {
+                console.warn('[Explorer] API Response not OK:', response.status);
+                this.renderError(`서버 오류 (${response.status}) - 상위 폴더로 이동하거나 나중에 시도해주세요.`);
+                return;
+            }
+
             const items = await response.json();
+            if (!Array.isArray(items)) {
+                console.warn('[Explorer] Received non-array items:', items);
+                this.renderError('데이터 형식이 올바르지 않습니다.');
+                return;
+            }
+
             this.renderTable(items);
         } catch (err) {
             console.error('[Explorer] Failed to load folder:', err);
@@ -131,12 +145,17 @@ class FolderExplorer {
             const iconClass = this.getIconClass(item);
             const dateStr = item.lastModifiedTime ? new Date(item.lastModifiedTime).toLocaleDateString() : '-';
 
+            const isRead = item.folder || unreadManager.isRead(item.id);
+            const nameClass = isRead ? 'read-item-name' : 'unread-item-name';
+            const badgeHtml = isRead ? '' : '<span class="unread-badge">N</span>';
+
             tr.innerHTML = `
                 <td class="col-name">
                     <span class="explorer-icon ${iconClass}">
                         <i class="${item.folder ? 'fas fa-folder' : 'fas fa-file-alt'}"></i>
                     </span>
-                    <span class="item-name">${item.name}</span>
+                    <span class="item-name ${nameClass}">${item.name}</span>
+                    ${badgeHtml}
                 </td>
                 <td class="col-version">
                     ${item.folder ? '-' : `<span class="badge-version" data-item-id="${item.id}" data-item-name="${item.name}">v${item.vNumber || 1}</span>`}
@@ -154,6 +173,19 @@ class FolderExplorer {
                 tr.onclick = (e) => {
                     // Prevent loading if clicking on the version badge
                     if (e.target.classList.contains('badge-version')) return;
+
+                    // Set globals for version dropdown loading
+                    window.currentHubId = this.currentHubId;
+                    window.currentProjectId = this.currentProjectId;
+                    window.currentItemId = item.id;
+                    window.currentVersionId = item.id;
+
+                    // Mark as read
+                    if (!item.folder) {
+                        if (unreadManager.markAsRead(item.id)) {
+                            this.renderTable(items); // Re-render to update UI
+                        }
+                    }
                     this.loadIntoViewer(item.urn, item.name);
                 };
 
@@ -209,7 +241,7 @@ class FolderExplorer {
                 toggleBtn.classList.toggle('active', this.isCompareMode);
                 toggleBtn.innerHTML = this.isCompareMode ? '<i class="fas fa-times"></i> 비교 취소' : '<i class="fas fa-columns"></i> 버전 비교';
                 if (this.currentVersions) {
-                    this.renderVersionTable(listBody, this.currentVersions, itemName);
+                    this.renderVersionTable(listBody, this.currentVersions, itemName, itemId);
                 }
             };
         }
@@ -221,20 +253,20 @@ class FolderExplorer {
             const versions = await response.json();
 
             this.currentVersions = versions;
-            this.renderVersionTable(listBody, versions, itemName);
+            this.renderVersionTable(listBody, versions, itemName, itemId);
         } catch (err) {
             console.error('[Explorer] Version fetch error:', err);
             listBody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:40px; color:var(--accent-red);">버전 정보를 가져올 수 없습니다.</td></tr>';
         }
     }
 
-    renderVersionTable(container, versions, itemName) {
+    renderVersionTable(container, versions, itemName, itemId) {
         container.innerHTML = '';
         versions.forEach(v => {
             const tr = document.createElement('tr');
             const dateStr = this.formatDate(v.name || v.displayName);
 
-            // 1. localStorage에서 해당 버전의 메모 조회 (version.id 기준)
+            // localStorage에서 해당 버전의 메모 조회
             const localKey = `memo-${v.id}`;
             const localMemo = localStorage.getItem(localKey) || v.description || '';
 
@@ -265,7 +297,6 @@ class FolderExplorer {
                 saveBtn.textContent = '...';
                 try {
                     localStorage.setItem(`memo-${v.id}`, newDesc);
-                    console.log(`[Explorer] 데이터 저장 완료 (localStorage): ${newDesc}`);
                     const memoUrl = '/api/version-memo';
                     await fetch(memoUrl, {
                         method: 'POST',
@@ -294,7 +325,7 @@ class FolderExplorer {
                         if (this.compareSelection.length >= 2) return alert('이미 2개의 버전이 선택되었습니다.');
                         this.compareSelection.push(v.id);
                     }
-                    this.renderVersionTable(container, versions, itemName);
+                    this.renderVersionTable(container, versions, itemName, itemId);
 
                     if (this.compareSelection.length === 2) {
                         this.executeCompare(this.compareSelection[0], this.compareSelection[1]);
@@ -305,17 +336,20 @@ class FolderExplorer {
                 };
             } else {
                 viewBtn.onclick = async () => {
-                    console.log(`[Explorer] VIEW 버튼 클릭 - 팝업 종료 및 모델 로드 시퀀스 시작`);
                     document.getElementById('version-modal').style.display = 'none';
                     await new Promise(r => setTimeout(r, 300));
 
                     const decodedId = this.decodeUrn(v.id);
-                    console.log(`[FINAL ATTEMPT] 원본ID(Decoded): ${decodedId}`);
-
                     try {
                         const { getSafeUrn } = await import('./viewer.js');
                         const finalUrn = getSafeUrn(decodedId);
-                        console.log(`[FINAL ATTEMPT] 최종URN: ${finalUrn}`);
+
+                        // Set globals for version dropdown loading
+                        window.currentHubId = this.currentHubId;
+                        window.currentProjectId = this.currentProjectId;
+                        window.currentItemId = itemId;
+                        window.currentVersionId = v.id;
+
                         this.loadVersionWithStatusCheck(finalUrn, `${itemName} (V${v.vNumber})`);
                     } catch (e) {
                         console.error('[Explorer] Failed to process URN:', e);
@@ -330,10 +364,6 @@ class FolderExplorer {
     executeCompare(urn1, urn2) {
         const raw1 = this.decodeUrn(urn1);
         const raw2 = this.decodeUrn(urn2);
-
-        console.log('[Explorer Compare] URN1:', raw1);
-        console.log('[Explorer Compare] URN2:', raw2);
-
         if (typeof window.compareModels === 'function') {
             window.compareModels(raw1, raw2);
         } else {
@@ -341,12 +371,8 @@ class FolderExplorer {
         }
     }
 
-    /**
-     * Helper to decode Base64 URN if necessary.
-     */
     decodeUrn(encUrn) {
         if (!encUrn) return encUrn;
-        // Check if it's already a safe base64 URN
         if (encUrn.startsWith('urn:dXJu') || encUrn.startsWith('dXJu')) {
             try {
                 const b64 = encUrn.replace('urn:', '').replace(/-/g, '+').replace(/_/g, '/');
@@ -363,60 +389,31 @@ class FolderExplorer {
         if (!dateString) return '-';
         const d = new Date(dateString);
         if (isNaN(d.getTime())) return dateString;
-
         const pad = (num) => String(num).padStart(2, '0');
         const yyyy = d.getFullYear();
         const mm = pad(d.getMonth() + 1);
         const dd = pad(d.getDate());
         const hh = pad(d.getHours());
         const min = pad(d.getMinutes());
-
         return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
     }
 
     async loadVersionWithStatusCheck(urn, label) {
-        // URN Validation
-        console.log(`\n[EXPLORER] Loading Version...`);
-        console.log(` - Label: ${label}`);
-        console.log(` - Raw URN: ${urn}`);
-
         if (!urn) {
             alert('이 버전에는 뷰어용 데이터가 없습니다.');
             return;
         }
-
-        const isBase64 = (str) => {
-            try { return btoa(atob(str)) === str; } catch (err) { return false; }
-        }
-        console.log(` - URN format check: ${isBase64(urn) ? 'Base64 Valid' : 'Raw (Needs internal encoding check)'}`);
-
-        // Show loading spinner
         const loading = document.getElementById('viewer-loading');
         if (loading) loading.style.display = 'flex';
-
         try {
-            // [Fix] Strip 'urn:' prefix for the server-side API call to avoid 400 errors
             const cleanUrnForApi = urn.replace('urn:', '');
-            console.log(` - Calling Status API: /api/aps/model/${cleanUrnForApi}/status`);
-
             const statusResp = await fetch(`/api/aps/model/${cleanUrnForApi}/status`, {
                 headers: { 'Accept': 'application/json' }
             });
-
-            if (!statusResp.ok) {
-                const errText = await statusResp.text();
-                console.warn(`[Explorer] Status API HTTP Error: ${statusResp.status}. Loading directly. Response text:`, errText);
-                return this.loadIntoViewer(urn, label);
-            }
-
+            if (!statusResp.ok) return this.loadIntoViewer(urn, label);
             const contentType = statusResp.headers.get("content-type");
-            if (!contentType || !contentType.includes("application/json")) {
-                console.warn('[Explorer] Status API returned non-JSON. Loading directly.');
-                return this.loadIntoViewer(urn, label);
-            }
-
+            if (!contentType || !contentType.includes("application/json")) return this.loadIntoViewer(urn, label);
             const statusData = await statusResp.json();
-
             if (statusData.status === 'success' || statusData.progress === 'complete') {
                 this.loadIntoViewer(urn, label);
             } else if (statusData.status === 'inprogress' || statusData.status === 'pending') {
@@ -427,65 +424,42 @@ class FolderExplorer {
                 alert('모델 변환에 실패했거나 데이터가 없습니다.');
             }
         } catch (err) {
-            console.error('[Explorer] Status check failed:', err);
             this.loadIntoViewer(urn, label);
         }
-
     }
 
     async loadIntoViewer(urn, name) {
-        console.log(`[Explorer] loadIntoViewer 호출 - URN: ${urn}`);
         this.switchMode('viewer');
-
-        // Layout Recovery: Ensure single viewer mode is active
         const comparisonContainer = document.getElementById('comparison-container');
-        if (comparisonContainer) {
-            comparisonContainer.style.display = 'none';
-        }
-        if (this.viewerContainer) {
-            this.viewerContainer.style.display = 'block';
-        }
+        if (comparisonContainer) comparisonContainer.style.display = 'none';
+        if (this.viewerContainer) this.viewerContainer.style.display = 'block';
 
-        // Robust model loading: Clean up existing model first
         if (window._viewer) {
-            console.log('[Explorer] Cleaning up current viewer instance...');
             try {
-                // Finish dual viewers if they exist
                 if (window.viewerLeft) { window.viewerLeft.finish(); window.viewerLeft = null; }
                 if (window.viewerRight) { window.viewerRight.finish(); window.viewerRight = null; }
-
-                if (window._viewer.model) {
-                    window._viewer.unloadModel(window._viewer.model);
-                }
-            } catch (e) { console.warn('[Explorer] Cleanup error:', e); }
+                if (window._viewer.model) window._viewer.unloadModel(window._viewer.model);
+            } catch (e) { }
         }
 
-        // Dynamically import viewer functions
         const { loadModel } = await import('./viewer.js');
-
         if (window._viewer) {
             try {
-                // Reinforce: Ensure viewer is started/running
-                if (!window._viewer.running) {
-                    console.log('[Explorer] Viewer not running, starting...');
-                    window._viewer.start();
-                }
-
-                // Await model loading to ensure timing
+                if (!window._viewer.running) window._viewer.start();
                 await loadModel(window._viewer, urn);
-
                 const label = document.getElementById('model-name-label');
                 if (label) label.textContent = name;
-
                 const topBarName = document.getElementById('viewer-model-name');
                 if (topBarName) topBarName.textContent = name;
 
-                console.log(`[Explorer] 모델 로드 완료: ${urn}`);
-
-                // Trigger resize for layout adjustment
+                if (window.currentHubId && window.currentProjectId && window.currentItemId) {
+                    try {
+                        const { loadVersionsDropdown } = await import('./version-manager.js');
+                        loadVersionsDropdown(window.currentHubId, window.currentProjectId, window.currentItemId, window.currentVersionId);
+                    } catch (e) { }
+                }
                 window.dispatchEvent(new Event('resize'));
             } catch (err) {
-                console.error('[Explorer] 모델 로드 실패:', err);
                 alert('모델을 로드하는 중 오류가 발생했습니다.');
             } finally {
                 const loading = document.getElementById('viewer-loading');
@@ -493,7 +467,6 @@ class FolderExplorer {
             }
         }
     }
-
 
     refresh() {
         if (this.currentFolderId) {
@@ -504,4 +477,3 @@ class FolderExplorer {
 
 export const explorer = new FolderExplorer();
 window.explorer = explorer;
-

@@ -31,22 +31,27 @@ service.getInternalTwoLeggedToken = async () => {
 
 /**
  * Autodesk 로그인 페이지로 리다이렉트할 URL 생성
+ * @param {string} [callbackUrl] - 동적으로 결정된 콜백 URL (없으면 .env 값 사용)
  */
-service.getAuthorizationUrl = () => {
+service.getAuthorizationUrl = (callbackUrl) => {
+    const redirectUri = callbackUrl || APS_CALLBACK_URL;
     const url = authenticationClient.authorize(
         APS_CLIENT_ID,
         ResponseType.Code,
-        APS_CALLBACK_URL,
+        redirectUri,
         INTERNAL_TOKEN_SCOPES
     );
-    console.log('[APS] Authorization URL generated:', url);
+    console.log('[APS] Authorization URL generated with callback:', redirectUri);
     return url;
 };
 
 /**
  * OAuth 콜백 처리 - 인증 코드로 토큰 교환
+ * @param {string} [callbackUrl] - 로그인 시에 사용한 콜백 URL
  */
-service.authCallbackMiddleware = async (req, res, next) => {
+service.authCallbackMiddleware = async (req, res, next, callbackUrl) => {
+    const redirectUri = callbackUrl || APS_CALLBACK_URL;
+    console.log('[APS] OAuth callback - using redirect_uri:', redirectUri);
     console.log('[APS] OAuth callback - query params:', JSON.stringify(req.query));
 
     // Autodesk가 에러를 반환한 경우
@@ -62,11 +67,11 @@ service.authCallbackMiddleware = async (req, res, next) => {
     }
 
     try {
-        console.log('[APS] Exchanging code for tokens...');
+        console.log('[APS] Exchanging code for tokens with redirect_uri:', redirectUri);
         const internalCredentials = await authenticationClient.getThreeLeggedToken(
             APS_CLIENT_ID,
             req.query.code,
-            APS_CALLBACK_URL,
+            redirectUri,  // 로그인 시와 동일한 URI 필수
             { clientSecret: APS_CLIENT_SECRET }
         );
         console.log('[APS] Got internal token. Fetching public token...');
@@ -75,7 +80,7 @@ service.authCallbackMiddleware = async (req, res, next) => {
             APS_CLIENT_ID,
             { clientSecret: APS_CLIENT_SECRET, scopes: PUBLIC_TOKEN_SCOPES }
         );
-        // 세션에 저장 (express-session은 서버 메모리에 저장, 크기 제한 없음)
+        // 세션에 저장
         req.session.public_token = publicCredentials.access_token;
         req.session.internal_token = internalCredentials.access_token;
         req.session.refresh_token = publicCredentials.refresh_token;
@@ -165,4 +170,40 @@ service.getProjectContents = async (hubId, projectId, folderId, accessToken) => 
 service.getItemVersions = async (projectId, itemId, accessToken) => {
     const resp = await dataManagementClient.getItemVersions(projectId, itemId, { accessToken });
     return resp.data;
+};
+
+// ───────────────────────────────────────────────
+// ACC Issues API (BIM 360 / ACC)
+// ───────────────────────────────────────────────
+
+/**
+ * 프로젝트의 Issue Container ID를 가져옵니다.
+ */
+service.getIssueContainerInfo = async (hubId, projectId, accessToken) => {
+    const response = await fetch(`https://developer.api.autodesk.com/project/v1/hubs/${hubId}/projects/${projectId}`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to get project info: ${response.statusText}`);
+    }
+    const data = await response.json();
+    const issuesRel = data.data?.relationships?.issues;
+    if (issuesRel && issuesRel.data && issuesRel.data.id) {
+        return issuesRel.data.id;
+    }
+    return null;
+};
+
+/**
+ * Container ID를 사용하여 해당 프로젝트의 전체 이슈를 조회합니다.
+ */
+service.getProjectIssues = async (containerId, accessToken) => {
+    const response = await fetch(`https://developer.api.autodesk.com/issues/v1/containers/${containerId}/issues`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+    });
+    if (!response.ok) {
+        throw new Error(`Failed to get issues: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.results || data.data || [];
 };

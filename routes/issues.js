@@ -18,19 +18,51 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         const title = data.title || '이슈 해결 결과 보고서';
         const logoBase64 = data.logoBase64 || '';
 
+        // [Field Selector] Build field visibility flags — use data.selectedFields if available, fallback to data.sf
+        const rawSf = data.selectedFields || data.sf || {};
+        const sf = {
+            no: rawSf.no !== false && String(rawSf.no) !== 'false',
+            structure: rawSf.structure !== false && String(rawSf.structure) !== 'false',
+            work_type: rawSf.work_type !== false && String(rawSf.work_type) !== 'false',
+            description: rawSf.description !== false && String(rawSf.description) !== 'false',
+            resolution: rawSf.resolution !== false && String(rawSf.resolution) !== 'false',
+            screenshot: rawSf.screenshot !== false && String(rawSf.screenshot) !== 'false'
+        };
+
+        // [Crucial Debug] Write to a file since terminal logs might be missed
+        try {
+            const debugPayload = { timestamp: new Date().toISOString(), sf, issuesCount: issuesRaw.length, titleLength: title.length, hasLogo: !!logoBase64 };
+            fs.writeFileSync(path.join(__dirname, '..', 'pdf_debug.log'), JSON.stringify(debugPayload, null, 2));
+        } catch (e) {
+            console.error('DEBUG_LOG_WRITE_FAILED:', e.message);
+        }
+
+        // [Debug] Log basic request info
+        console.log(`[Issues PDF] Exporting ${issuesRaw.length} issues. Title: ${title}`);
+
+        // Pre-compute combined flag for use in HBS
+        sf.hasMetaRow = sf.no || sf.structure || sf.work_type;
+
+        // Calculate layout properties for the single-table approach
+        let totalColsCount = 0;
+        if (sf.no) totalColsCount += 2;
+        if (sf.structure) totalColsCount += 2;
+        if (sf.work_type) totalColsCount += 2;
+
+        sf.colspan = Math.max(1, totalColsCount - 1);
+        sf.totalCols = Math.max(1, totalColsCount);
+        sf.halfCols = Math.max(1, Math.floor(totalColsCount / 2));
+
+        console.log('[Issues PDF] selectedFields:', sf);
+
         // Map each raw issue to the template fields
-        // status is passed as-is so {{#if (eq status "Closed")}} works in HBS
         const issues = issuesRaw.map((issue, idx) => {
             // [Greedy Extraction Strategy] — Use unique, unambiguous keys
             const rawStruct = (issue.structure_name || issue.structureName || issue.structure || issue.struct || issue.Structure || '').toString().trim();
             const rawWork = (issue.work_type || issue.workType || issue.work_Type || issue.worktype || issue.WorkType || '').toString().trim();
 
-            const finalStruct = rawStruct || '-';
-            const finalWork = rawWork || '-';
-
-            const rawKeys = Object.keys(issue || {}).join(', ');
-            const valStruct = (issue.structure_name || issue.structureName || '').toString().trim();
-            const valWork = (issue.work_type || issue.workType || '').toString().trim();
+            const valStruct = rawStruct || '-';
+            const valWork = rawWork || '-';
             const valIssueNum = (issue.issue_number || issue.issueNumber || issue.dbId || issue.id || (idx + 1)).toString().trim();
 
             return {
@@ -50,10 +82,13 @@ router.post('/api/issues/export-pdf', async (req, res) => {
             console.log("PDF 생성 직전 데이터 보정 결과:", JSON.stringify(issues[0], null, 2));
             console.log("서버가 받은 원본 데이터 샘플:", JSON.stringify(issuesRaw[0], null, 2));
         }
+
+        const templateData = { title, logoBase64, issues, sf };
         const templatePath = path.join(__dirname, '..', 'views', 'issue-report.hbs');
+
         const templateHtml = fs.readFileSync(templatePath, 'utf8');
         const template = handlebars.compile(templateHtml);
-        const html = template({ title, logoBase64, issues });
+        const html = template(templateData);
 
         // 3. Launch Puppeteer with generous timeout for many images
         const browser = await puppeteer.launch({
