@@ -343,6 +343,7 @@ class FolderExplorer {
                     try {
                         const { getSafeUrn } = await import('./viewer.js');
                         const finalUrn = getSafeUrn(decodedId);
+                        console.log(`[FINAL ATTEMPT] 최종URN: ${finalUrn}`);
 
                         // Set globals for version dropdown loading
                         window.currentHubId = this.currentHubId;

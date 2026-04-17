@@ -9,7 +9,7 @@ import { loadModelWithTracking } from './viewer.js';
  * Fetches version history for an item and populates the top-bar dropdown.
  */
 export async function loadVersionsDropdown(hubId, projectId, itemId, currentVersionId) {
-    // [NEW] 전역 상태 즉시 동기화 (오염 방지)
+    // 전역 상태 즉시 동기화
     window.currentItemId = itemId;
     window.currentUrn = currentVersionId; // URN으로 사용됨
 

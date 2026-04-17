@@ -150,15 +150,16 @@ router.get('/api/hubs/:hub_id/projects/:project_id/contents/:item_id/versions', 
 });
 
 /**
- * [NEW] GET /api/hubs/:hub_id/projects/:project_id/issues
+ * GET /api/hubs/:hub_id/projects/:project_id/issues
+ * 프로젝트 내 ACC Issues 목록 조회 (실시간)
  */
 router.get('/api/hubs/:hub_id/projects/:project_id/issues', async function (req, res, next) {
     try {
         const hubId = req.params.hub_id;
         const projectId = req.params.project_id;
         const accessToken = req.internalOAuthToken.access_token;
-        const containerId = await getIssueContainerInfo(hubId, projectId, accessToken);
 
+        const containerId = await getIssueContainerInfo(hubId, projectId, accessToken);
         if (!containerId) return res.json([]);
 
         const issues = await getProjectIssues(containerId, accessToken);
@@ -171,8 +172,10 @@ router.get('/api/hubs/:hub_id/projects/:project_id/issues', async function (req,
             work_type: i.attributes?.customAttributes?.find(attr => attr.title === '공종' || attr.title === 'Work Type')?.value || '-',
             raw: i
         }));
+
         res.json(formattedIssues);
     } catch (err) {
+        console.error('[ACC Issues API] Error:', err.message || err);
         next(err);
     }
 });

@@ -99,23 +99,33 @@ export function loadModel(viewer, rawId) {
                 if ((!modelName || modelName === 'Unknown Model') && viewer.model) {
                     const modelData = viewer.model.getData();
                     if (modelData && modelData.name) modelName = modelData.name;
+                    else if (viewer.model.getDocumentNode() && viewer.model.getDocumentNode().data) {
+                        modelName = viewer.model.getDocumentNode().data.name;
+                    }
                 }
 
+                // 파일명에서 버전 정보 추출 시도
                 let versionSuffix = '';
                 const vMatch = modelName.match(/_V(\d+)/i) || modelName.match(/ver\.?\s?(\d+)/i);
-                if (vMatch) versionSuffix = ` (Ver. ${vMatch[1]})`;
+                if (vMatch) {
+                    versionSuffix = ` (Ver. ${vMatch[1]})`;
+                }
 
                 const fullDisplayName = modelName + versionSuffix;
+                console.log(`[Viewer] Updating UI title to: ${fullDisplayName}`);
 
                 if (window.syncUIState) {
                     window.syncUIState(fullDisplayName, { urn: finalUrn });
                 } else {
                     const topBarTitle = document.getElementById('viewer-model-name');
                     if (topBarTitle) topBarTitle.textContent = fullDisplayName;
+
                     const infoBarLabel = document.getElementById('model-name-label');
                     if (infoBarLabel) infoBarLabel.textContent = fullDisplayName;
                 }
-            } catch (e) { }
+            } catch (titleErr) {
+                console.warn('[Viewer] 제목 업데이트 중 오류 발생 (무시하고 로드 진행):', titleErr);
+            }
 
             const onTreeCreated = () => {
                 viewer.removeEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, onTreeCreated);
@@ -124,13 +134,18 @@ export function loadModel(viewer, rawId) {
             viewer.addEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, onTreeCreated);
 
             viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
+                console.log('[Viewer] GEOMETRY_LOADED - Harness-Context 가동');
                 try {
-                    if (window.ContextHarness) window.ContextHarness.extract(viewer);
+                    if (window.ContextHarness) {
+                        window.ContextHarness.extract(viewer);
+                    }
                     if (window.syncUIState) {
                         const metadataName = viewer.model.getData().metadata?.name || viewer.model.getDocumentNode()?.data.name;
                         window.syncUIState(metadataName, { urn: finalUrn });
                     }
-                } catch (e) { }
+                } catch (loadErr) {
+                    console.error('[Viewer] Context extraction failed:', loadErr);
+                }
             }, { once: true });
 
             viewer.loadDocumentNode(doc, viewables);
@@ -233,6 +248,9 @@ window.compareModels = async (urn1, urn2) => {
     }
 };
 
+/**
+ * 모델 데이터에서 통계와 요약 정보를 추출합니다.
+ */
 async function extractModelSummary(viewer, model) {
     if (!model) return null;
     const summary = {
@@ -255,5 +273,6 @@ async function extractModelSummary(viewer, model) {
             summary.totalElements += count;
         }
     }
+    console.log('[Viewer] Final Summary:', summary);
     return summary;
 }

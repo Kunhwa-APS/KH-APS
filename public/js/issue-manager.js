@@ -1,6 +1,6 @@
 /**
  * public/js/issue-manager.js
- * Manages custom 3D issues, markers, and local storage persistence.
+ * Manages custom 3D issues, markers, and local storage persistence with PDF Item Selection.
  */
 import { unreadManager } from './unread-manager.js';
 
@@ -24,18 +24,15 @@ class IDBStorage {
 
     init() {
         return new Promise((resolve, reject) => {
-            console.log('[IDBStorage] Initializing IndexedDB...');
             const request = indexedDB.open(this.dbName, 1);
             request.onupgradeneeded = (e) => {
                 const db = e.target.result;
                 if (!db.objectStoreNames.contains(this.storeName)) {
                     db.createObjectStore(this.storeName);
-                    console.log('[IDBStorage] Store created:', this.storeName);
                 }
             };
             request.onsuccess = (e) => {
                 this.db = e.target.result;
-                console.log('[IDBStorage] Connection opened.');
                 resolve();
             };
             request.onerror = (e) => reject(e.target.error);
@@ -87,7 +84,6 @@ export class IssueManager {
     }
 
     async init() {
-        console.log('[IssueManager] Initializing...');
         try {
             await this.storage.init();
             const legacyData = localStorage.getItem('aps-viewer-issues');
@@ -100,7 +96,6 @@ export class IssueManager {
             this.issues = saved || [];
             this.renderIssueList();
             this.restorePins();
-            this._updateBulkBtnLabel();
 
             const syncEvents = [
                 Autodesk.Viewing.CAMERA_CHANGE_EVENT,
@@ -113,6 +108,10 @@ export class IssueManager {
             syncEvents.forEach(evt => {
                 this.viewer.removeEventListener(evt, this._onCameraChange);
                 this.viewer.addEventListener(evt, this._onCameraChange);
+            });
+
+            this.viewer.addEventListener(Autodesk.Viewing.GEOMETRY_LOADED_EVENT, () => {
+                this.restorePins();
             });
 
             this._injectMarkerToggle();
@@ -136,6 +135,7 @@ export class IssueManager {
                 </div>
             </label>
         `;
+        container.style.position = 'relative';
         container.appendChild(wrap);
         document.getElementById('issue-marker-toggle-cb').addEventListener('change', (e) => {
             this.toggleMarkerVisibility(e.target.checked);
@@ -144,8 +144,14 @@ export class IssueManager {
 
     toggleMarkerVisibility(visible) {
         this.markersVisible = visible;
-        this.htmlMarkersMap.forEach(data => data.element.style.visibility = visible ? 'visible' : 'hidden');
-        if (this.tempIssueMarker) this.tempIssueMarker.style.visibility = visible ? 'visible' : 'hidden';
+        this.htmlMarkersMap.forEach((data) => {
+            if (data.element) {
+                data.element.style.visibility = visible ? 'visible' : 'hidden';
+            }
+        });
+        if (this.tempIssueMarker) {
+            this.tempIssueMarker.style.visibility = visible ? 'visible' : 'hidden';
+        }
     }
 
     initOverlays() {
@@ -161,7 +167,6 @@ export class IssueManager {
             console.error('[IssueManager] Save failed:', e);
         }
         this.renderIssueList();
-        this._updateBulkBtnLabel();
     }
 
     toggleCreationMode(on) {
@@ -182,29 +187,45 @@ export class IssueManager {
         const rect = this.viewer.container.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
+
         const result = this.viewer.impl.hitTest(x, y, true);
+
         if (result && result.dbId) {
+            const dbId = result.dbId;
             this.removeTempMarker();
             this.tempIssuePosition = result.intersectPoint.clone();
+
             const marker = document.createElement('div');
+            marker.id = 'temp-issue-marker-div';
             marker.className = 'issue-temp-marker';
             this.viewer.container.appendChild(marker);
             this.tempIssueMarker = marker;
+
             this.syncAllMarkers();
             this.toggleCreationMode(false);
-            this.showCreateModal(result.dbId, result.intersectPoint, null);
-            this.captureIssueThumbnail((b64) => {
+
+            // Enter Markup Mode
+            this.enterMarkupMode(dbId, result.intersectPoint);
+
+            this.captureIssueThumbnail((base64) => {
                 const modal = document.getElementById('issue-modal');
                 if (modal && modal.style.display === 'flex') {
-                    modal.dataset.thumbnail = b64;
+                    modal.dataset.thumbnail = base64;
                     const preview = document.getElementById('issue-preview-img');
-                    if (preview) { preview.src = b64; document.getElementById('modal-image-preview').style.display = 'flex'; }
+                    if (preview) {
+                        preview.src = base64;
+                        document.getElementById('modal-image-preview').style.display = 'flex';
+                    }
                 }
             });
+        } else {
+            this.toggleCreationMode(false);
         }
     }
 
-    _onCameraChange() { this.syncAllMarkers(); }
+    _onCameraChange() {
+        this.syncAllMarkers();
+    }
 
     _syncLoop() {
         this.syncAllMarkers();
@@ -213,33 +234,50 @@ export class IssueManager {
 
     syncAllMarkers() {
         if (this.tempIssueMarker && this.tempIssuePosition) {
-            const screen = this.viewer.worldToClient(this.tempIssuePosition);
-            this.tempIssueMarker.style.left = `${Math.round(screen.x)}px`;
-            this.tempIssueMarker.style.top = `${Math.round(screen.y)}px`;
+            const screenPos = this.viewer.worldToClient(this.tempIssuePosition);
+            this.tempIssueMarker.style.left = `${Math.round(screenPos.x)}px`;
+            this.tempIssueMarker.style.top = `${Math.round(screenPos.y)}px`;
+
+            const camera = this.viewer.navigation.getCamera();
+            const dir = new THREE.Vector3().subVectors(this.tempIssuePosition, camera.position).normalize();
+            const dot = dir.dot(camera.getWorldDirection(new THREE.Vector3()));
+            this.tempIssueMarker.style.display = dot > 0 ? 'block' : 'none';
         }
-        this.htmlMarkersMap.forEach((data, id) => {
-            const screen = this.viewer.worldToClient(data.position);
-            data.element.style.left = `${Math.round(screen.x)}px`;
-            data.element.style.top = `${Math.round(screen.y)}px`;
-            const cam = this.viewer.navigation.getCamera();
-            const dir = new THREE.Vector3().subVectors(data.position, cam.position).normalize();
-            const dot = dir.dot(cam.getWorldDirection(new THREE.Vector3()));
-            data.element.style.display = dot > 0.05 ? 'block' : 'none';
+
+        this.htmlMarkersMap.forEach((data) => {
+            const worldPos = data.position;
+            const screenPoint = this.viewer.worldToClient(new THREE.Vector3(worldPos.x, worldPos.y, worldPos.z));
+
+            if (!screenPoint || (screenPoint.x === 0 && screenPoint.y === 0)) {
+                data.element.style.display = 'none';
+                return;
+            }
+
+            data.element.style.left = `${Math.round(screenPoint.x)}px`;
+            data.element.style.top = `${Math.round(screenPoint.y)}px`;
+
+            const camera = this.viewer.navigation.getCamera();
+            const dir = new THREE.Vector3().subVectors(worldPos, camera.position).normalize();
+            const dot = dir.dot(camera.getWorldDirection(new THREE.Vector3()));
+
+            data.element.style.display = (dot > 0.05) ? 'block' : 'none';
         });
     }
 
     removeTempMarker() {
-        if (this.tempIssueMarker) this.tempIssueMarker.remove();
-        this.tempIssueMarker = null;
+        if (this.tempIssueMarker) {
+            this.tempIssueMarker.remove();
+            this.tempIssueMarker = null;
+        }
         this.tempIssuePosition = null;
     }
 
     captureIssueThumbnail(callback, markupExt = null) {
-        const w = this.viewer.container.clientWidth;
-        const h = this.viewer.container.clientHeight;
-        this.viewer.getScreenShot(w, h, (blobUrl) => {
+        const width = this.viewer.container.clientWidth;
+        const height = this.viewer.container.clientHeight;
+        this.viewer.getScreenShot(width, height, (blobUrl) => {
             if (!blobUrl) return callback(null);
-            this._performHardCanvasCompositing(blobUrl, w, h, markupExt, callback);
+            this._performHardCanvasCompositing(blobUrl, width, height, markupExt, callback);
         });
     }
 
@@ -253,9 +291,9 @@ export class IssueManager {
             ctx.fillRect(0, 0, w, h);
             ctx.drawImage(img, 0, 0, w, h);
             if (markupExt) await new Promise(resolve => markupExt.renderToCanvas(ctx, resolve));
-            const b64 = canvas.toDataURL('image/jpeg', 0.85);
+            const finalB64 = canvas.toDataURL('image/jpeg', 0.85);
             URL.revokeObjectURL(img.src);
-            callback(b64);
+            callback(finalB64);
         };
         img.src = blobUrl;
     }
@@ -263,11 +301,13 @@ export class IssueManager {
     showCreateModal(dbId, point, thumbnail) {
         const modal = document.getElementById('issue-modal');
         if (!modal) return;
+        modal.dataset.mode = 'create';
         modal.dataset.dbId = dbId;
         modal.dataset.point = JSON.stringify(point);
         modal.dataset.viewstate = JSON.stringify(this.viewer.getState());
         modal.dataset.urn = this.viewer.model?.getData().urn;
         modal.dataset.itemId = window.currentItemId || null;
+
         if (thumbnail) {
             const img = document.getElementById('issue-preview-img');
             if (img) img.src = thumbnail;
@@ -275,7 +315,7 @@ export class IssueManager {
         }
         modal.style.display = 'flex';
 
-        // Auto-extract metadata
+        // Metadata extraction
         const parts = (document.getElementById('viewer-model-name')?.innerText || '').split('_');
         if (parts.length >= 6) {
             const structure = document.getElementById('issue-structure');
@@ -289,7 +329,11 @@ export class IssueManager {
     }
 
     addIssue(data) {
-        const issue = { ...data, id: Date.now(), createdAt: new Date().toISOString() };
+        const issue = {
+            id: Date.now(),
+            ...data,
+            createdAt: new Date().toISOString()
+        };
         this.issues.push(issue);
         this.saveIssues();
         this.createPin(issue);
@@ -326,7 +370,7 @@ export class IssueManager {
                 <button class="markup-btn" data-tool="arrow"><i class="fas fa-long-arrow-alt-right"></i></button>
                 <button class="markup-btn" data-tool="text"><i class="fas fa-font"></i></button>
             </div>
-            <button class="markup-finish-btn">완료</button>
+            <button class="markup-finish-btn">작성 완료</button>
         `;
         document.body.appendChild(tb);
         tb.querySelectorAll('.markup-btn').forEach(btn => {
@@ -375,6 +419,7 @@ export class IssueManager {
         marker.className = 'issue-marker';
         if (issue.status === 'Closed') marker.classList.add('green');
         marker.dataset.id = issue.id;
+
         if (unreadManager.isUnread(issue.id)) {
             const b = document.createElement('div');
             b.className = 'marker-unread-badge'; b.textContent = 'N';
@@ -440,6 +485,7 @@ export class IssueManager {
                                 <span class="issue-status-badge ${i.status.toLowerCase()}">${i.status}</span>
                                 <span class="issue-item-title">${i.title}</span>
                                 <div class="issue-item-actions">
+                                    ${i.status === 'Closed' ? `<button class="issue-btn-pdf" title="Export PDF">📄</button>` : ''}
                                     <button class="issue-btn-edit"><i class="fas fa-edit"></i></button>
                                     <button class="issue-btn-delete"><i class="fas fa-trash-alt"></i></button>
                                 </div>
@@ -463,6 +509,8 @@ export class IssueManager {
                 }
                 this.focusIssue(issue);
             };
+            const pdfBtn = item.querySelector('.issue-btn-pdf');
+            if (pdfBtn) pdfBtn.onclick = (e) => { e.stopPropagation(); this.openPdfExportModal(id); };
             item.querySelector('.issue-btn-edit').onclick = (e) => { e.stopPropagation(); this.showEditModal(id); };
             item.querySelector('.issue-btn-delete').onclick = (e) => { e.stopPropagation(); this.deleteIssue(id); };
             item.querySelector('.issue-check').onchange = () => this._updateBulkBtnLabel();
@@ -477,8 +525,55 @@ export class IssueManager {
         btn.textContent = checked > 0 ? `📄 선택 내보내기(${checked})` : '📄 전체 내보내기';
     }
 
+    openPdfExportModal(issueId) {
+        const modal = document.getElementById('pdf-export-modal');
+        if (!modal) return;
+        const issue = this.issues.find(i => i.id === issueId);
+        this.exportPayload = issue ? [issue] : [...this.issues];
+        this.setupPdfModalListeners();
+        this._populatePdfItemList();
+        modal.style.display = 'flex';
+    }
+
+    _populatePdfItemList() {
+        const listEl = document.getElementById('pdf-item-list');
+        if (!listEl) return;
+        listEl.innerHTML = this.exportPayload.map(i => `
+            <label class="pdf-item-label" style="display:flex;align-items:center;gap:8px;padding:5px;cursor:pointer;">
+                <input type="checkbox" class="pdf-issue-check" data-id="${i.id}" checked>
+                <span class="v-num">#${i.id.toString().slice(-4)}</span>
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;">${i.title}</span>
+            </label>
+        `).join('');
+    }
+
+    setupPdfModalListeners() {
+        const modal = document.getElementById('pdf-export-modal');
+        if (!modal || modal.dataset.listenersBound) return;
+        modal.dataset.listenersBound = '1';
+        document.getElementById('close-pdf-modal').onclick = () => modal.style.display = 'none';
+        document.getElementById('cancel-pdf-btn').onclick = () => modal.style.display = 'none';
+
+        document.getElementById('run-pdf-export-btn').onclick = async () => {
+            const checkedIds = [...document.querySelectorAll('.pdf-issue-check:checked')].map(el => parseInt(el.dataset.id));
+            const selectedIssues = this.issues.filter(i => checkedIds.includes(i.id));
+            if (selectedIssues.length === 0) return alert('항목을 선택해주세요.');
+
+            const sf = {
+                no: document.getElementById('pdf-field-no')?.checked,
+                structure: document.getElementById('pdf-field-structure')?.checked,
+                work_type: document.getElementById('pdf-field-worktype')?.checked,
+                description: document.getElementById('pdf-field-description')?.checked,
+                resolution: document.getElementById('pdf-field-resolution')?.checked,
+                screenshot: document.getElementById('pdf-field-images')?.checked
+            };
+            await this.exportToPdf(selectedIssues, sf);
+            modal.style.display = 'none';
+        };
+    }
+
     async focusIssue(issue) {
-        if (!issue || !issue.point) return;
+        if (!issue) return;
         const state = typeof issue.viewstate === 'string' ? JSON.parse(issue.viewstate) : issue.viewstate;
         this.viewer.restoreState(state);
     }
@@ -491,8 +586,16 @@ export class IssueManager {
     }
 
     showEditModal(id) {
-        // Implement modal show logic or use a generic one
-        console.log('Edit modal for', id);
+        const issue = this.issues.find(i => i.id === id);
+        if (!issue) return;
+        const modal = document.getElementById('issue-modal');
+        modal.dataset.mode = 'edit';
+        modal.dataset.editId = id;
+        document.getElementById('issue-title').value = issue.title;
+        document.getElementById('issue-desc').value = issue.description;
+        document.getElementById('issue-assignee').value = issue.assignee;
+        document.getElementById('issue-status').value = issue.status;
+        modal.style.display = 'flex';
     }
 
     async exportToPdf(issues, sf) {
@@ -505,7 +608,7 @@ export class IssueManager {
         if (resp.ok) {
             const blob = await resp.blob();
             const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = 'report.pdf'; a.click();
+            const a = document.createElement('a'); a.href = url; a.download = `report_${Date.now()}.pdf`; a.click();
         }
     }
 }

@@ -8,7 +8,7 @@ window.findNodeById = function (nodes, id) {
     if (!nodes || (!Array.isArray(nodes) && typeof nodes[Symbol.iterator] !== 'function')) return null;
 
     for (let node of nodes) {
-        // [ENHANCED] Search by ID, URN, or ItemID
+        // [ENHANCED] Search by ID, URN, or ItemID (and check partials for versioned IDs)
         const isMatch = (
             node.id === id ||
             node.urn === id ||
@@ -17,6 +17,7 @@ window.findNodeById = function (nodes, id) {
         );
 
         if (isMatch) return node;
+
         if (node.children && (Array.isArray(node.children) || typeof node.children[Symbol.iterator] === 'function')) {
             const found = window.findNodeById(node.children, id);
             if (found) return found;
@@ -75,10 +76,13 @@ async function getVersions(hubId, projectId, region, itemId) {
     const versions = await getJSON(`/api/hubs/${hubId}/projects/${projectId}/contents/${encodeURIComponent(itemId)}/versions`);
     return versions.map(version => {
         const vNum = (version.vNumber !== undefined && version.vNumber !== null) ? version.vNumber : '?';
-        const vUrn = btoa(version.id).replace(/=/g, '');
+        const vUrn = Buffer.from(version.id).toString('base64').replace(/=/g, '');
         const displayText = `V${vNum} - ${version.displayName || version.name}`;
+
+        // Populate map for both full URN and base64 version
         window.urnToNameMap[vUrn] = version.displayName || version.name;
         if (version.id) window.urnToNameMap[version.id] = version.displayName || version.name;
+
         return createTreeNode(`version|${hubId}|${projectId}|${region}|${vUrn}|${displayText}|${itemId}`, displayText, 'icon-version');
     });
 }

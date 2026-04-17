@@ -1,0 +1,173 @@
+/* APS AI Platform - Hubs Browser + Map Styles */
+
+:root {
+    --header-height: 3.5em;
+    --sidebar-width: 300px;
+    --bg-primary: #0f172a;
+    --bg-header: rgba(15, 23, 42, 0.97);
+    --bg-sidebar: #1e293b;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --accent: #6366f1;
+    --accent-hover: #818cf8;
+    --border: rgba(148, 163, 184, 0.15);
+    --tab-bg: rgba(99, 102, 241, 0.1);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body, html {
+    margin: 0;
+    padding: 0;
+    height: 100vh;
+    overflow: hidden;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
+/* ── Header ── */
+#header {
+    position: absolute;
+    height: var(--header-height);
+    width: 100%;
+    display: flex;
+    flex-flow: row nowrap;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    background: var(--bg-header);
+    border-bottom: 1px solid var(--border);
+    backdrop-filter: blur(20px);
+    z-index: 100;
+}
+
+#header .logo {
+    height: 2em;
+    filter: brightness(0) invert(1);
+    opacity: 0.9;
+}
+
+#header .title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+    margin-right: auto;
+    white-space: nowrap;
+}
+
+/* ── Map / Viewer 탭 ── */
+.tab-group {
+    display: flex;
+    gap: 4px;
+    background: var(--tab-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 3px;
+}
+
+.tab-btn {
+    padding: 5px 14px;
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+    white-space: nowrap;
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+    background: rgba(255,255,255,0.06);
+}
+
+.tab-btn.active {
+    background: var(--accent);
+    color: white;
+}
+
+/* ── Login Button ── */
+#login {
+    padding: 7px 18px;
+    background: linear-gradient(135deg, var(--accent), #8b5cf6);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    font-family: inherit;
+}
+
+#login:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+}
+
+/* ── Sidebar ── */
+#sidebar {
+    position: absolute;
+    width: var(--sidebar-width);
+    left: 0;
+    top: var(--header-height);
+    bottom: 0;
+    overflow-y: auto;
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border);
+    z-index: 10;
+}
+
+#tree { margin: 12px; }
+
+/* ── Viewer 패널 ── */
+#preview {
+    position: absolute;
+    left: var(--sidebar-width);
+    right: 0;
+    top: var(--header-height);
+    bottom: 0;
+}
+
+/* ── Map 패널 ── */
+#map-container {
+    position: absolute;
+    left: var(--sidebar-width);
+    right: 0;
+    top: var(--header-height);
+    bottom: 0;
+}
+
+/* Cesium 위젯 오버라이드 */
+.cesium-widget-credits {
+    display: none !important;
+}
+
+/* InspireTree 다크 테마 */
+.inspire-tree .title-wrap {
+    color: var(--text-primary) !important;
+    font-size: 13px;
+}
+.inspire-tree .title-wrap:hover {
+    background: rgba(99, 102, 241, 0.15) !important;
+    color: var(--accent) !important;
+}
+.inspire-tree .selected > .title-wrap {
+    background: rgba(99, 102, 241, 0.2) !important;
+    color: var(--accent) !important;
+}
+.inspire-tree .toggle { filter: invert(1); }
+
+/* Responsive */
+@media (max-width: 768px) {
+    #sidebar { width: 100%; bottom: 70%; }
+    #preview, #map-container {
+        left: 0;
+        top: 30%;
+    }
+}

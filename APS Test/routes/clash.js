@@ -21,8 +21,11 @@ router.get('/api/clash/:projectId/containers', authRefreshMiddleware, async (req
         const containers = await getClashContainers(projectId, req.internalOAuthToken.access_token, region || 'US');
         res.json(containers);
     } catch (err) {
-        console.error('[Clash] getClashContainers error:', err.response?.data || err.message);
-        res.status(err.response?.status || 500).json(err.response?.data || { error: err.message });
+        const status = err.response?.status || 500;
+        const data = err.response?.data || { error: err.message };
+        console.error('[Clash] getClashContainers error:', status);
+        console.dir(data, { depth: null });
+        res.status(status).json(data);
     }
 });
 
@@ -37,8 +40,11 @@ router.get('/api/clash/:containerId/tests', authRefreshMiddleware, async (req, r
         const tests = await getClashTests(containerId, req.internalOAuthToken.access_token, region || 'US');
         res.json(tests);
     } catch (err) {
-        console.error('[Clash] getClashTests error:', err.response?.data || err.message);
-        res.status(err.response?.status || 500).json(err.response?.data || { error: err.message });
+        const status = err.response?.status || 500;
+        const data = err.response?.data || { error: err.message };
+        console.error('[Clash] getClashTests error:', status);
+        console.dir(data, { depth: null });
+        res.status(status).json(data);
     }
 });
 
@@ -53,8 +59,11 @@ router.get('/api/clash/:containerId/tests/:testId/results', authRefreshMiddlewar
         const results = await getClashResults(containerId, testId, req.internalOAuthToken.access_token, region || 'US');
         res.json(results);
     } catch (err) {
-        console.error('[Clash] getClashResults error:', err.response?.data || err.message);
-        res.status(err.response?.status || 500).json(err.response?.data || { error: err.message });
+        const status = err.response?.status || 500;
+        const data = err.response?.data || { error: err.message };
+        console.error('[Clash] getClashResults error:', status);
+        console.dir(data, { depth: null });
+        res.status(status).json(data);
     }
 });
 

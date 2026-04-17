@@ -161,11 +161,13 @@
                             <i class="fas fa-chevron-down"></i>
                         </button>
                         <ul id="version-list" class="version-dropdown-list" style="display:none;">
+                            <!-- Populated by version-manager.js -->
                             <li class="version-loading">불러오는 중...</li>
                         </ul>
                     </div>
                 </div>
-                <div class="top-bar-right"></div>
+                <div class="top-bar-right">
+                </div>
             </div>
 
             <!-- Loading Overlay -->
@@ -607,22 +609,58 @@
                         value="이슈 해결 결과 보고서"></div>
                 <div class="form-group"><label>Logo</label><input type="file" id="pdf-export-logo" accept="image/*">
                 </div>
-                <div class="form-group">
-                    <label>Fields</label>
+
+                <!-- ── PDF Field Selector ────────────────────────────── -->
+                <div class="form-group" id="pdf-field-selector-group">
+                    <label style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <span>데이터 항목 선택</span>
+                        <button type="button" id="pdf-field-select-all-btn"
+                            style="font-size:11px;padding:2px 10px;border:1px solid #a5b4fc;border-radius:4px;background:#eef2ff;cursor:pointer;color:#4f46e5;font-weight:600;">전체
+                            선택</button>
+                    </label>
                     <div id="pdf-field-list"
-                        style="display:flex;flex-wrap:wrap;gap:10px;padding:10px;background:#f8fafc;border-radius:6px;border:1px solid #e2e8f0;">
-                        <label><input type="checkbox" id="pdf-field-no" checked> No</label>
-                        <label><input type="checkbox" id="pdf-field-structure" checked> 구조물</label>
-                        <label><input type="checkbox" id="pdf-field-worktype" checked> 공종</label>
-                        <label><input type="checkbox" id="pdf-field-description" checked> 내용</label>
-                        <label><input type="checkbox" id="pdf-field-resolution" checked> 수정사항</label>
-                        <label><input type="checkbox" id="pdf-field-images" checked> 이미지</label>
+                        style="display:flex;flex-wrap:wrap;gap:6px 14px;padding:8px 12px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;">
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-no" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> No
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-structure" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> 구조물
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-worktype" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> 공종
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-description" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> 간섭 내용
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-resolution" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> 수정사항
+                        </label>
+                        <label style="display:flex;align-items:center;gap:5px;font-size:13px;cursor:pointer;">
+                            <input type="checkbox" id="pdf-field-images" checked
+                                style="accent-color:#6366f1;cursor:pointer;"> 캡쳐이미지
+                        </label>
                     </div>
                 </div>
-                <div class="form-group"><label>Issues</label>
+                <!-- ── PDF Item Selector ─────────────────────────────── -->
+                <div class="form-group" id="pdf-item-selector-group">
+                    <label style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <span>포함할 항목 선택</span>
+                        <button type="button" id="pdf-select-all-btn"
+                            style="font-size:11px;padding:2px 10px;border:1px solid #cbd5e1;border-radius:4px;background:#f1f5f9;cursor:pointer;color:#334155;font-weight:600;">전체
+                            선택</button>
+                    </label>
                     <div id="pdf-item-list"
-                        style="max-height:200px;overflow-y:auto;border:1px solid #e2e8f0;padding:10px;"></div>
+                        style="max-height:220px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:6px;padding:6px 10px;background:#f8fafc;display:flex;flex-direction:column;gap:4px;">
+                        <!-- Populated dynamically by issue-manager.js -->
+                        <p style="color:#94a3b8;font-size:12px;margin:0;padding:6px 0;">이슈를 불러오는 중...</p>
+                    </div>
                 </div>
+
             </div>
             <div class="modal-footer"><button class="btn-cancel" id="cancel-pdf-btn">Cancel</button><button
                     class="btn-save" id="run-pdf-export-btn" style="background:#10b981;">Export</button></div>
@@ -665,9 +703,12 @@
     <script src="/js/harness-context.js?v=1.0"></script>
     <script src="/js/harness-action.js?v=1.0"></script>
     <script src="/js/export-utils.js?v=1.0"></script>
+    <!-- explorer.js manages the folder table view -->
     <script src="/js/explorer.js?v=1.1" type="module"></script>
+    <!-- Navisworks-style Clash Detective Extension -->
     <script src="/js/NavisClashExtension.js"></script>
     <script src="/js/dashboard-premium.js?v=1.0" type="module"></script>
+    <!-- main.js wires viewer + tree as ES6 module -->
     <script src="/js/main.js?v=1.1" type="module"></script>
 
     <script>
@@ -703,20 +744,27 @@
         });
 
         window.toggleAiAssistant = function () {
+            console.log("[AI-Panel] AI Assistant Toggle Clicked");
             const container = document.getElementById('ai-assistant-container');
-            if (!container) return;
-            const isHidden = window.getComputedStyle(container).display === 'none';
-            if (isHidden) {
-                container.style.setProperty('display', 'block', 'important');
-                container.style.setProperty('position', 'fixed', 'important');
-                container.style.setProperty('z-index', '100000', 'important');
-                container.style.opacity = '1';
-                container.style.transform = 'translateY(0) scale(1)';
-                setTimeout(() => document.getElementById('chat-input')?.focus(), 100);
-            } else {
-                container.style.display = 'none';
-                container.style.opacity = '0';
-                container.style.transform = 'translateY(40px) scale(0.92)';
+            if (container) {
+                const isHidden = window.getComputedStyle(container).display === 'none';
+                if (isHidden) {
+                    container.style.display = 'flex'; // Flex로 열기
+                    setTimeout(() => {
+                        container.style.opacity = '1';
+                        container.style.transform = 'translateY(0) scale(1)';
+                    }, 10);
+
+                    // Focus input
+                    const chatInput = document.getElementById('chat-input');
+                    if (chatInput) setTimeout(() => chatInput.focus(), 100);
+                } else {
+                    container.style.opacity = '0';
+                  ntainer.style.transform = 'translateY(40px) scale;
+                    setTimeout(() => {
+                        container.style.display = 'none';
+                    }, 300);
+                }
             }
         };
     </script>
