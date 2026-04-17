@@ -18,7 +18,7 @@ function getDynamicCallbackUrl(req) {
 
     // 일반 요청인 경우 host 헤더 사용
     const protocol = req.secure ? 'https' : req.headers['x-forwarded-proto'] || 'http';
-    const host = req.headers.host; // e.g. localhost:8080 or blushingly-esoteric-rosette.ngrok-free.dev
+    const host = req.headers.host;
     return `${protocol}://${host}/api/auth/callback`;
 }
 
@@ -82,7 +82,6 @@ router.get('/api/auth/logout', function (req, res) {
 });
 
 /**
- * GET /api/auth/callback
  * Autodesk 인증 후 콜백 처리 (동적 콜백 URL 사용)
  */
 router.get('/api/auth/callback', function (req, res, next) {

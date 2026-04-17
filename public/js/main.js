@@ -82,7 +82,6 @@ try {
                     console.warn('[Main] GEOMETRY_LOADED - missing context, version dropdown not populated');
                 }
             });
-
             // 2. Add Toolbar Buttons (Event-Driven)
             currentViewer.addEventListener(Autodesk.Viewing.TOOLBAR_CREATED_EVENT, () => {
                 console.log('[Main] Toolbar created, adding custom buttons...');
@@ -348,7 +347,6 @@ async function handleTreeSelection(node) {
             window.currentItemId = tokens[6];
             window.currentVersionId = tokens[4]; // urn/versionId
         }
-
         // Ensure we switch to viewer mode if we are in explorer mode
         explorer.switchMode('viewer');
 
@@ -363,7 +361,6 @@ async function handleTreeSelection(node) {
                 if (type === 'item') {
                     window.currentItemId = tokens[4]; // Store for cross-version issue management
                     loadVersionsDropdown(tokens[1], tokens[2], tokens[4], node.id);
-
                     window._saveModelContext(urn, {
                         hubId: tokens[1],
                         projectId: tokens[2],
@@ -828,7 +825,7 @@ function setupTabs() {
             headerMapBtn.classList.remove('active');
             headerDashboardBtn.classList.add('active');
             headerProjectsBtn.classList.remove('active');
-            
+
             if (dashboardPremium) dashboardPremium.style.display = 'flex';
             if (dashboardLegacy) dashboardLegacy.style.display = 'none';
             if (mapContainer) mapContainer.style.display = 'none';
@@ -950,7 +947,6 @@ async function loadHubsOnMap() {
         console.warn('Map hub load error:', err.message);
     }
 }
-
 /**
  * ── Centralized UI Sync Utility ──
  * Updates titles and triggers version dropdown refresh consistently.
@@ -1011,6 +1007,7 @@ window.retryExtractName = async (context, maxRetries = 10) => {
             // [Fix] getDocument().getProperty() 제거 및 최신 API 표준 반영
             foundName = modelData.loadOptions?.bubbleNode?.name?.() ||
                 model.getDocumentNode()?.data?.name ||
+                model.loader?.itemName ||
                 modelData.metadata?.name;
 
             if (foundName && !['{3D}', 'Scene', 'undefined', 'Loading...'].includes(String(foundName).trim())) {
@@ -1046,8 +1043,21 @@ window.syncUIState = async (name, context = {}) => {
     // Immediate injection if name provided
     let initialName = (name && !['undefined', '{3D}'].includes(String(name))) ? name : null;
 
+    const isUrn = (str) => {
+        if (!str) return false;
+        return str.startsWith('urn:') || str.startsWith('dXJuOi') || str.includes('.rvt') === false && str.includes('.dwg') === false && str.length > 50;
+    };
+
     const updateUI = (finalName) => {
         if (!finalName) return;
+
+        // URN Guard: Do not overwrite with raw URN if we already have a human-readable name
+        const currentTitle = document.getElementById('viewer-model-name')?.innerText;
+        if (isUrn(finalName) && currentTitle && !isUrn(currentTitle)) {
+            console.log('[Sync] URN Guard: Blocking raw URN overwrite of valid title:', finalName);
+            return;
+        }
+
         const titleElements = ['viewer-model-name', 'model-title', 'model-name-label'];
         titleElements.forEach(id => {
             const el = document.getElementById(id);

@@ -73,7 +73,6 @@ window.showToast = function (message, type = 'info', duration = 3000) {
         setTimeout(() => toast.remove(), 300);
     }, duration);
 };
-
 const AIPanel = (() => {
     let chatHistory = [];
     let modelContext = null;
@@ -177,7 +176,6 @@ const AIPanel = (() => {
         // [Fix] 클릭 시 다른 요소(뷰어 등)가 이벤트를 가로채지 못하도록 전파 방지
         div.addEventListener('mousedown', (e) => e.stopPropagation());
         div.addEventListener('click', (e) => e.stopPropagation());
-
         const meta = document.createElement('div');
         meta.className = 'bubble-meta';
         meta.textContent = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
@@ -372,6 +370,7 @@ ${structureTable}
                 body: JSON.stringify({ messages: chatHistory, systemContext: fullSystemContext })
             });
 
+            hideTyping();
             if (!res.ok) {
                 const err = await res.json();
                 addBubble('error', `Error: ${err.error || 'Unknown error'}`, true);
@@ -570,7 +569,6 @@ ${structureTable}
             setSendEnabled(!!elements.chatInput.value.trim());
         }
     }
-
     /**
      * [Action-Harness] APS Viewer 명령 실행 브릿지
      */
@@ -596,43 +594,6 @@ ${structureTable}
 
         return result;
     }
-
-    // ── Analyze current selection in viewer ─────────────────────
-    async function analyzeSelection() {
-        if (!modelContext || !currentUrn) {
-            window.showToast('First select elements in the Viewer', 'error');
-            return;
-        }
-        const question = `Analyze the selected BIM element: "${modelContext.name}". Provide key details about its type, properties, and any relevant engineering insights.`;
-        await sendMessage(question);
-    }
-
-    // ── Update context panel ────────────────────────────────────
-    function updateContext(elementData) {
-        modelContext = elementData;
-        const body = elements.contextBody;
-        body.innerHTML = '';
-
-        const tags = [
-            { label: `📦 ${elementData.name || 'Element'}` },
-            { label: `🔑 ID: ${elementData.dbIds?.[0] || '?'}` },
-        ];
-
-        // Add properties
-        (elementData.properties || []).slice(0, 6).forEach(p => {
-            if (p.value && p.value !== '') {
-                tags.push({ label: `${p.displayName}: ${p.displayValue}` });
-            }
-        });
-
-        tags.forEach(t => {
-            const span = document.createElement('span');
-            span.className = 'context-tag';
-            span.textContent = t.label;
-            body.appendChild(span);
-        });
-    }
-
     /**
      * Makes the chat panel draggable by its header
      */
@@ -762,7 +723,6 @@ ${structureTable}
             document.removeEventListener('mouseup', stopResizing);
         }
     }
-
     // ── Helpers ─────────────────────────────────────────────────
     function setSendEnabled(enabled) {
         elements.sendBtn.disabled = !enabled;
@@ -791,7 +751,6 @@ ${structureTable}
         elements.chatInput.addEventListener('keydown', (e) => {
             // [IME] 한글 입력(컴포지션) 중에는 Enter로 메시지 보내지 않음
             if (e.isComposing || e.keyCode === 229) return;
-
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
                 sendMessage(elements.chatInput.value);
@@ -807,7 +766,6 @@ ${structureTable}
             e.stopPropagation();
             elements.chatInput.focus();
         });
-
         // Auto-resize and enable/disable send
         elements.chatInput.addEventListener('input', () => {
             autoResizeTextarea();

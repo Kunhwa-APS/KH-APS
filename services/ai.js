@@ -39,8 +39,6 @@ const SYSTEM_PROMPT = `당신은 '건화(Kunhwa)' 사용자의 곁에서 함께 
 - User: "고마워, 이슈 목록 좀 보여줘"
 - Assistant: "그럼요! 제가 바로 정리해서 가져올게요. 잠시만 기다려 주세요! \`\`\`json {"action": "viewer_command", "command": "export_issues_pdf", "params": {}} \`\`\`"`;
 
-
-
 // ── OpenAI (GPT) ─────────────────────────────────────────────────────────────
 async function callOpenAI(messages, systemPrompt) {
     const apiKey = process.env.OPENAI_API_KEY;
@@ -59,7 +57,7 @@ async function callOpenAI(messages, systemPrompt) {
     const response = await axios.post(
         'https://api.openai.com/v1/chat/completions',
         payload,
-        { headers: { Authorization: `Bearer ${apiKey} `, 'Content-Type': 'application/json' } }
+        { headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' } }
     );
     return response.data.choices[0].message.content;
 }
@@ -150,7 +148,6 @@ async function callOllama(messages, systemPrompt) {
         throw err;
     }
 }
-
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 async function callAI(messages, systemPrompt) {
     const provider = PROVIDER();

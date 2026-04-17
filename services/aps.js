@@ -80,6 +80,7 @@ service.authCallbackMiddleware = async (req, res, next, callbackUrl) => {
             APS_CLIENT_ID,
             { clientSecret: APS_CLIENT_SECRET, scopes: PUBLIC_TOKEN_SCOPES }
         );
+        // 세션에 저장 (express-session은 서버 메모리에 저장, 크기 제한 없음)
         req.session.public_token = publicCredentials.access_token;
         req.session.internal_token = internalCredentials.access_token;
         req.session.refresh_token = publicCredentials.refresh_token;

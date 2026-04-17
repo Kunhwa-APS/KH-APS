@@ -38,7 +38,7 @@
 
     <!-- Three Mesh BVH for Narrow Phase Clash -->
     <script src="https://unpkg.com/three-mesh-bvh@0.7.3/build/index.umd.cjs"></script>
-    
+
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
@@ -171,6 +171,7 @@
                     </div>
                 </div>
                 <div class="top-bar-right">
+                    <!-- Actions can be added here later -->
                 </div>
             </div>
 
@@ -319,7 +320,7 @@
                 </div>
             </div>
 
-            <!-- Project Selection Dashboard (Legacy) -->
+            <!-- Project Selection Dashboard -->
             <div id="project-selection-dashboard" class="project-dashboard" style="display:none;">
                 <div class="dashboard-header">
                     <div class="greeting-section">
@@ -857,7 +858,6 @@
                         <p style="color:#94a3b8;font-size:12px;margin:0;padding:6px 0;">이슈를 불러오는 중...</p>
                     </div>
                 </div>
-
             </div>
             <div class="modal-footer">
                 <button class="btn-cancel" id="cancel-pdf-btn">Cancel</button>
@@ -916,18 +916,17 @@
     <!-- ── Scripts ────────────────────────────────────────────────────────── -->
     <!-- ai-panel uses non-module approach, load first -->
     <script src="/js/ai-panel.js?v=1.1"></script>
-    <!-- [Harness Engineering] 핵심 레이어 추가 -->
     <script src="/js/harness-context.js?v=1.0"></script>
     <script src="/js/harness-action.js?v=1.0"></script>
     <script src="/js/export-utils.js?v=1.0"></script>
     <!-- explorer.js manages the folder table view -->
-    <script src="/js/explorer.js?v=20260330_1752" type="module"></script>
+    <script src="/js/explorer.js?v=1.1" type="module"></script>
     <!-- Navisworks-style Clash Detective Extension -->
     <script src="/js/NavisClashExtension.js"></script>
     <!-- Premium Dashboard Logic -->
     <script src="/js/dashboard-premium.js?v=1.0" type="module"></script>
     <!-- main.js wires viewer + tree as ES6 module -->
-    <script src="/js/main.js?v=20260330_1721" type="module"></script>
+    <script src="/js/main.js?v=1.1" type="module"></script>
 
     <!-- URN input handler (non-module, can reference window globals) -->
     <script>
@@ -970,10 +969,10 @@
                 dragging = false;
                 handle.classList.remove('dragging');
                 document.body.style.cursor = '';
-                document.body.style.userSelect = '';
+                document.body.style.userSel = '';
             });
 
-            // Note: Right Panel Resize/Collapse and Table Resizing are now handled in diff-viewer.js (ResizingEngine)
+            // Note: Right Panel Resize/Collapse andi            ow handled in diff-viewer.js (ResizingEngine)
         });
     </script>
     <!-- ── Floating AI Assistant Widget ──────────────────────────────────────── -->
@@ -1027,7 +1026,8 @@
             </div>
 
             <div class="suggestions" id="suggestions">
-                <button class="suggestion-chip" data-q="Summarize the loaded model for me">📋 Summarize model</button>
+                <button class="suggestion-chip" data-q="Summarize the loaded model for me">📋 Summarize
+                    model</button>
                 <button class="suggestion-chip" data-q="What types of elements are in this model?">🏗️ Element
                     types</button>
                 <button class="suggestion-chip" data-q="List all materials used">🎨 Materials</button>
@@ -1052,12 +1052,12 @@
     </div>
     <script>
         window.toggleAiAssistant = function () {
-            console.log("[AI-Panel] AI Assistant Toggle Clicked");
             const container = document.getElementById('ai-assistant-container');
             if (container) {
-                const isHidden = window.getComputedStyle(container).display === 'none';
-                if (isHidden) {
-                    container.style.display = 'flex'; // Block이 아닌 Flex로 열기
+                const currentDisplay = window.getComputedStyle(container).display;
+                if (currentDisplay === 'none') {
+                    // Show animation
+                    container.style.display = 'flex';
                     setTimeout(() => {
                         container.style.opacity = '1';
                         container.style.transform = 'translateY(0) scale(1)';
@@ -1067,12 +1067,15 @@
                     const chatInput = document.getElementById('chat-input');
                     if (chatInput) setTimeout(() => chatInput.focus(), 100);
                 } else {
+                    // Hide animation
                     container.style.opacity = '0';
                     container.style.transform = 'translateY(40px) scale(0.92)';
                     setTimeout(() => {
                         container.style.display = 'none';
                     }, 300);
                 }
+            } else {
+                console.error("오류: #ai-assistant-container 요소를 찾을 수 없음");
             }
         };
 

@@ -49,9 +49,22 @@ class FolderExplorer {
         this.renderLoading();
 
         try {
-            const url = `/api/hubs/${hubId}/projects/${projectId}/contents?folder_id=${folderId}`;
+            const url = `/api/hubs/${hubId}/projects/${projectId}/contents${folderId ? `?folder_id=${folderId}` : ''}`;
             const response = await fetch(url);
+
+            if (!response.ok) {
+                console.warn('[Explorer] API Response not OK:', response.status);
+                this.renderError(`서버 오류 (${response.status}) - 상위 폴더로 이동하거나 나중에 시도해주세요.`);
+                return;
+            }
+
             const items = await response.json();
+            if (!Array.isArray(items)) {
+                console.warn('[Explorer] Received non-array items:', items);
+                this.renderError('데이터 형식이 올바르지 않습니다.');
+                return;
+            }
+
             this.renderTable(items);
         } catch (err) {
             console.error('[Explorer] Failed to load folder:', err);
@@ -135,7 +148,6 @@ class FolderExplorer {
             const isRead = item.folder || unreadManager.isRead(item.id);
             const nameClass = isRead ? 'read-item-name' : 'unread-item-name';
             const badgeHtml = isRead ? '' : '<span class="unread-badge">N</span>';
-
             tr.innerHTML = `
                 <td class="col-name">
                     <span class="explorer-icon ${iconClass}">
@@ -160,7 +172,6 @@ class FolderExplorer {
                 tr.onclick = (e) => {
                     // Prevent loading if clicking on the version badge
                     if (e.target.classList.contains('badge-version')) return;
-
                     // ── [Fix] Set globals for version dropdown loading
                     window.currentHubId = this.currentHubId;
                     window.currentProjectId = this.currentProjectId;
@@ -173,7 +184,6 @@ class FolderExplorer {
                             this.renderTable(items); // Re-render to update UI
                         }
                     }
-
                     this.loadIntoViewer(item.urn, item.name);
                 };
 
@@ -336,13 +346,11 @@ class FolderExplorer {
                         const { getSafeUrn } = await import('./viewer.js');
                         const finalUrn = getSafeUrn(decodedId);
                         console.log(`[FINAL ATTEMPT] 최종URN: ${finalUrn}`);
-
                         // ── [Fix] Set globals for version dropdown loading
                         window.currentHubId = this.currentHubId;
                         window.currentProjectId = this.currentProjectId;
                         window.currentItemId = itemId;
                         window.currentVersionId = v.id;
-
                         this.loadVersionWithStatusCheck(finalUrn, `${itemName} (V${v.vNumber})`);
                     } catch (e) {
                         console.error('[Explorer] Failed to process URN:', e);
@@ -518,7 +526,6 @@ class FolderExplorer {
                         console.warn('[Explorer] Failed to load version dropdown:', e);
                     }
                 }
-
                 // Trigger resize for layout adjustment
                 window.dispatchEvent(new Event('resize'));
             } catch (err) {

@@ -144,7 +144,6 @@ export function loadModel(viewer, rawId) {
             } catch (titleErr) {
                 console.warn('[Viewer] 제목 업데이트 중 오류 발생 (무시하고 로드 진행):', titleErr);
             }
-
             const onTreeCreated = () => {
                 viewer.removeEventListener(Autodesk.Viewing.OBJECT_TREE_CREATED_EVENT, onTreeCreated);
                 console.log(`[Viewer] Model successfully loaded: ${finalUrn}`);
@@ -167,7 +166,6 @@ export function loadModel(viewer, rawId) {
                     console.error('[Viewer] Context extraction failed:', loadErr);
                 }
             }, { once: true });
-
             viewer.loadDocumentNode(doc, viewables);
         }, async (code, msg) => {
             console.error('Load Failed:', code, msg);

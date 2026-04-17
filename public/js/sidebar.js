@@ -17,7 +17,6 @@ window.findNodeById = function (nodes, id) {
         );
 
         if (isMatch) return node;
-
         if (node.children && (Array.isArray(node.children) || typeof node.children[Symbol.iterator] === 'function')) {
             const found = window.findNodeById(node.children, id);
             if (found) return found;

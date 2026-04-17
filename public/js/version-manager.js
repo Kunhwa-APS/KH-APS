@@ -166,7 +166,6 @@ export async function loadVersionsDropdown(hubId, projectId, itemId, currentVers
     }
 }
 
-
 /**
  * Legacy support / Optional modal
  */

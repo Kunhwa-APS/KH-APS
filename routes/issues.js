@@ -57,8 +57,12 @@ router.post('/api/issues/export-pdf', async (req, res) => {
 
         // Map each raw issue to the template fields
         const issues = issuesRaw.map((issue, idx) => {
-            const valStruct = (issue.structure_name || issue.structureName || issue.structure || '-').toString().trim();
-            const valWork = (issue.work_type || issue.workType || issue.workType || '-').toString().trim();
+            // [Greedy Extraction Strategy] — Use unique, unambiguous keys
+            const rawStruct = (issue.structure_name || issue.structureName || issue.structure || issue.struct || issue.Structure || '').toString().trim();
+            const rawWork = (issue.work_type || issue.workType || issue.work_Type || issue.worktype || issue.WorkType || '').toString().trim();
+
+            const valStruct = rawStruct || '-';
+            const valWork = rawWork || '-';
             const valIssueNum = (issue.issue_number || issue.issueNumber || issue.dbId || issue.id || (idx + 1)).toString().trim();
 
             return {
@@ -74,6 +78,11 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         });
 
         // 2. Read & compile Handlebars template
+        // 2. Read & compile Handlebars template
+        if (issues.length > 0) {
+            console.log("PDF 생성 직전 데이터 보정 결과:", JSON.stringify(issues[0], null, 2));
+            console.log("서버가 받은 원본 데이터 샘플:", JSON.stringify(issuesRaw[0], null, 2));
+        }
         const templateData = { title, logoBase64, issues, sf };
         const templatePath = path.join(__dirname, '..', 'views', 'issue-report.hbs');
 
@@ -81,7 +90,7 @@ router.post('/api/issues/export-pdf', async (req, res) => {
         const template = handlebars.compile(templateHtml);
         const html = template(templateData);
 
-        // 3. Launch Puppeteer with generous timeout
+        // 3. Launch Puppeteer with generous timeout for many images
         const browser = await puppeteer.launch({
             headless: 'new',
             args: ['--no-sandbox', '--disable-setuid-sandbox'],
