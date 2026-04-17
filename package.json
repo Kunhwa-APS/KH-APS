@@ -1,0 +1,35 @@
+{
+  "name": "aps-ai-platform",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "aps",
+    "autodesk",
+    "ai-platform"
+  ],
+  "author": "",
+  "license": "ISC",
+  "description": "APS 기반 AI 플랫폼",
+  "dependencies": {
+    "@aps_sdk/authentication": "^1.0.1",
+    "@aps_sdk/data-management": "^1.1.4",
+    "@aps_sdk/model-derivative": "^1.2.1",
+    "@aps_sdk/oss": "^1.3.3",
+    "axios": "^1.13.6",
+    "cookie-session": "^2.1.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "express-formidable": "^1.2.0",
+    "express-session": "^1.19.0",
+    "handlebars": "^4.7.8",
+    "multer": "^2.1.1",
+    "ollama": "^0.6.3",
+    "puppeteer": "^24.40.0"
+  }
+}
