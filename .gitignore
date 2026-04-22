@@ -1,4 +1,44 @@
+# ── Dependencies ──────────────────────────────────────────────
 node_modules/
+package-lock.json.bak
+
+# ── Environment & secrets ─────────────────────────────────────
 .env
+.env.local
+.env.*.local
+
+# ── Editor ────────────────────────────────────────────────────
 .vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ── Logs & runtime artifacts ──────────────────────────────────
 *.log
+logs/
+pdf_debug.log
+npm-debug.log*
+yarn-debug.log*
+
+# ── Build / tmp ───────────────────────────────────────────────
+dist/
+build/
+tmp/
+.cache/
+*.pid
+
+# ── Data (선택: 실제 데이터는 커밋 제외) ─────────────────────
+data/*.json
+!data/.gitkeep
+
+# ── Coverage / tests ──────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ── OS ────────────────────────────────────────────────────────
+*~
+
+# Claude Code session data
+.claude/

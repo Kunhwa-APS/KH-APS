@@ -1740,7 +1740,9 @@ const ResizingEngine = (() => {
     function loadSavedState() {
         const sidebar = document.getElementById('sidebar-right');
         const savedW = localStorage.getItem('ai-panel-width');
-        const isCollapsed = localStorage.getItem('ai-panel-collapsed') === 'true';
+        // Always start collapsed on page load
+        const isCollapsed = true;
+        localStorage.setItem('ai-panel-collapsed', 'true');
 
         if (sidebar) {
             if (savedW && !isNaN(parseInt(savedW))) {

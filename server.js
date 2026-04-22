@@ -1,29 +1,60 @@
+/**
+ * APS AI Platform — HTTP entry point
+ * ----------------------------------
+ *  · 설정 로드 및 검증 (./config.js)
+ *  · 보안 헤더, 요청 로거 적용
+ *  · 라우트 마운트
+ *  · 표준화된 404 / 에러 응답
+ */
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
-const { PORT, SERVER_SESSION_SECRET } = require('./config.js');
 
-let app = express();
+const config = require('./config.js');
+const {
+    errorHandler,
+    notFoundHandler,
+    securityHeaders,
+    requestLogger,
+} = require('./middleware');
 
-// Middleware for parsing JSON and URL-encoded bodies
+const app = express();
+app.disable('x-powered-by');
+
+// ── 전역 미들웨어 ──────────────────────────────────────────────
+app.use(securityHeaders);
+app.use(requestLogger);
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Static files (using public directory for the integrated app)
-app.use(express.static('public'));
+// 정적 자산 (캐시 정책 포함)
+app.use(express.static(path.join(__dirname, 'public'), {
+    maxAge: config.env === 'production' ? '1d' : 0,
+    etag: true,
+}));
 
-// express-session middleware
+// 세션
 app.use(session({
-    secret: SERVER_SESSION_SECRET,
+    secret: config.session.secret,
     resave: false,
     saveUninitialized: false,
     cookie: {
         httpOnly: true,
-        maxAge: 24 * 60 * 60 * 1000 // 24 hours
-    }
+        sameSite: 'lax',
+        secure: config.env === 'production',
+        maxAge: config.session.maxAge,
+    },
 }));
 
-// API Routes
+// ── 헬스체크 ───────────────────────────────────────────────────
+app.get('/health', (req, res) => res.json({
+    status: 'ok',
+    env: config.env,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+}));
+
+// ── API 라우트 ─────────────────────────────────────────────────
 app.use(require('./routes/auth.js'));
 app.use(require('./routes/hubs.js'));
 app.use(require('./routes/diff.js'));
@@ -37,17 +68,35 @@ const { geocodeRouter } = require('./routes/tiles.js');
 app.use(require('./routes/tiles.js'));
 app.use(geocodeRouter);
 
+// ── 404 및 에러 처리 ───────────────────────────────────────────
+// API 경로에만 JSON 404 반환 — 그 외는 SPA로 넘깁니다.
+app.use('/api', notFoundHandler);
+app.use(errorHandler);
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-    console.error('Server error:', err.message || err);
-    res.status(err.statusCode || 500).json({
-        error: err.message || 'Internal Server Error'
+// ── 서버 기동 ──────────────────────────────────────────────────
+const server = app.listen(config.port, () => {
+    console.log('');
+    console.log('  ╭────────────────────────────────────────────╮');
+    console.log(`  │  APS AI Platform — ${String(config.env).padEnd(22)}│`);
+    console.log(`  │  http://localhost:${String(config.port).padEnd(24)}│`);
+    console.log('  ╰────────────────────────────────────────────╯');
+    console.log('');
+});
+
+// 안전한 종료
+['SIGTERM', 'SIGINT'].forEach((sig) => {
+    process.on(sig, () => {
+        console.log(`\n[${sig}] Graceful shutdown…`);
+        server.close(() => process.exit(0));
+        setTimeout(() => process.exit(1), 10_000).unref();
     });
 });
 
-// Start the server
-app.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}...`);
-    console.log(`Open http://localhost:${PORT} in your browser`);
+process.on('unhandledRejection', (reason) => {
+    console.error('[unhandledRejection]', reason);
 });
+process.on('uncaughtException', (err) => {
+    console.error('[uncaughtException]', err);
+});
+
+module.exports = app;

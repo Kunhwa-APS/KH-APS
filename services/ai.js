@@ -1,10 +1,15 @@
+/**
+ * AI Service — provider-agnostic facade
+ * -----------------------------------------
+ *  · 어댑터 패턴: openai | gemini | ollama
+ *  · Social-Bypass 모드 (일상 대화 감지)
+ *  · Harness-Brain RAG 선택적 주입
+ */
 'use strict';
 
-const axios = require('axios');
+const { getProvider } = require('./ai-providers');
 
-const PROVIDER = () => process.env.AI_PROVIDER || 'gemini';
-
-// ── System Prompt ────────────────────────────────────────────────────────────
+// ── System Prompt ─────────────────────────────────────────────
 const SYSTEM_PROMPT = `당신은 '건화(Kunhwa)' 사용자의 곁에서 함께 고민하고 돕는 **'다정하고 유능한 파트너'**입니다.
 
 ### 🌟 응답 페르소나 & 톤앤매너
@@ -26,10 +31,10 @@ const SYSTEM_PROMPT = `당신은 '건화(Kunhwa)' 사용자의 곁에서 함께 
   "action": "viewer_command",
   "command": "SELECT | HIDE | ISOLATE | export_issues_pdf",
   "target": "string",
-  "params": { 
-    "targetStructure": "string", 
-    "targetWorkType": "string", 
-    "targetStatus": "string" 
+  "params": {
+    "targetStructure": "string",
+    "targetWorkType": "string",
+    "targetStatus": "string"
   }
 }
 
@@ -39,212 +44,82 @@ const SYSTEM_PROMPT = `당신은 '건화(Kunhwa)' 사용자의 곁에서 함께 
 - User: "고마워, 이슈 목록 좀 보여줘"
 - Assistant: "그럼요! 제가 바로 정리해서 가져올게요. 잠시만 기다려 주세요! \`\`\`json {"action": "viewer_command", "command": "export_issues_pdf", "params": {}} \`\`\`"`;
 
+const SOCIAL_BYPASS_APPEND = `
 
+## [Social-Bypass Mode]
+사용자가 일상적인 대화를 건넸습니다. 당신은 지금 사용자의 '다정하고 유능한 파트너'예요.
+- 전문적인 기능 안내나 거절 문구는 잠시 잊고, 친구와 수다를 떨듯 다정하게 대화에만 집중해 주세요.
+- 사용자가 힘들어하거나 지쳐 보이면 진심 어린 응원과 공감을 최우선으로 해 주세요.
+- 말투는 부드러운 '해요 체'로 유지해 주세요.`;
 
-// ── OpenAI (GPT) ─────────────────────────────────────────────────────────────
-async function callOpenAI(messages, systemPrompt) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error('OPENAI_API_KEY not set in .env');
+const SOCIAL_KEYWORDS = ['안녕', '하이', '반가워', '누구', '기분', '날씨', '고마워', '감사', '잘가'];
+const isSocialTalk = (msg) => !!msg && SOCIAL_KEYWORDS.some((k) => msg.includes(k));
 
-    const payload = {
-        model: 'gpt-4o-mini',
-        messages: [
-            { role: 'system', content: systemPrompt || SYSTEM_PROMPT },
-            ...messages
-        ],
-        max_tokens: 2048,
-        temperature: 0.3
-    };
-
-    const response = await axios.post(
-        'https://api.openai.com/v1/chat/completions',
-        payload,
-        { headers: { Authorization: `Bearer ${apiKey} `, 'Content-Type': 'application/json' } }
-    );
-    return response.data.choices[0].message.content;
-}
-
-// ── Google Gemini ─────────────────────────────────────────────────────────────
-async function callGemini(messages, systemPrompt, retryCount = 0) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY not set in .env');
-
-    // Try available models in order of efficiency and likelihood of quota availability
-    const availableModels = ['gemini-2.0-flash', 'gemini-flash-latest', 'gemini-pro-latest'];
-    const model = availableModels[retryCount] || 'gemini-pro-latest';
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-    console.log(`[AI] Calling Gemini: ${model} (Attempt: ${retryCount + 1})`);
-
-    // Convert OpenAI-style messages to Gemini format
-    const contents = messages.map(m => ({
-        role: m.role === 'assistant' ? 'model' : 'user',
-        parts: [{ text: m.content }]
-    }));
-
-    const payload = {
-        systemInstruction: { parts: [{ text: systemPrompt || SYSTEM_PROMPT }] },
-        contents,
-        generationConfig: { maxOutputTokens: 2048, temperature: 0.3 }
-    };
-
+// ── 공통 디스패처 ─────────────────────────────────────────────
+async function callAI(messages, systemPrompt = SYSTEM_PROMPT, options = {}) {
+    const provider = getProvider();
+    console.log(`[ai] provider=${provider.name} messages=${messages.length}`);
     try {
-        const response = await axios.post(url, payload, {
-            headers: { 'Content-Type': 'application/json' }
-        });
-
-        const resultText = response.data.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!resultText) {
-            console.error('[AI] Gemini response missing content:', JSON.stringify(response.data, null, 2));
-            return 'Gemini response was empty or blocked.';
-        }
-        return resultText;
+        return await provider.chat({ messages, systemPrompt, options });
     } catch (err) {
-        // Detailed error logging
-        if (err.response) {
-            console.error(`[AI] Gemini API Error (${err.response.status}):`, JSON.stringify(err.response.data, null, 2));
-        } else {
-            console.error('[AI] Gemini Request Error:', err.message);
-        }
-
-        // Handle 404 (Model not found) or 429 (Rate Limit) by retrying with fallback
-        const isRetryable = err.response?.status === 404 || err.response?.status === 429;
-        if (isRetryable && retryCount < 2) {
-            const delay = err.response?.status === 429 ? (Math.pow(2, retryCount) * 1000) : 100;
-            console.warn(`[AI] Error ${err.response?.status}. Retrying with fallback in ${delay}ms...`);
-            await new Promise(resolve => setTimeout(resolve, delay));
-            return callGemini(messages, systemPrompt, retryCount + 1);
-        }
-
+        console.error(`[ai:${provider.name}] error:`, err.response?.data || err.message);
         throw err;
     }
 }
 
-// ── Ollama (Local LLM) ────────────────────────────────────────────────────────
-async function callOllama(messages, systemPrompt) {
-    const host = process.env.OLLAMA_HOST || 'http://localhost:11434';
-    const model = process.env.OLLAMA_MODEL || 'llama3';
+// ── Public API ────────────────────────────────────────────────
 
-    console.log(`[AI] Calling Ollama: ${model} @ ${host}`);
-
-    try {
-        const { Ollama } = require('ollama');
-        const ollama = new Ollama({ host });
-
-        const response = await ollama.chat({
-            model: model,
-            messages: [
-                { role: 'system', content: systemPrompt || SYSTEM_PROMPT },
-                ...messages
-            ],
-            stream: false
-        });
-
-        return response.message.content;
-    } catch (err) {
-        console.error('[AI] Ollama Error:', err.message);
-        if (err.message.includes('ECONNREFUSED')) {
-            throw new Error(`Ollama connection failed at ${host}. Ensure Ollama is running ('ollama serve').`);
-        }
-        throw err;
-    }
-}
-
-// ── Dispatcher ────────────────────────────────────────────────────────────────
-async function callAI(messages, systemPrompt) {
-    const provider = PROVIDER();
-    console.log(`[AI] Using provider: ${provider}`);
-    if (provider === 'openai') return callOpenAI(messages, systemPrompt);
-    if (provider === 'gemini') return callGemini(messages, systemPrompt);
-    if (provider === 'ollama') return callOllama(messages, systemPrompt);
-    throw new Error(`Unknown AI provider: ${provider}. Set AI_PROVIDER=openai, gemini, or ollama`);
-}
-
-// ── Public API ────────────────────────────────────────────────────────────────
-
-/**
- * Analyze model metadata and answer a question
- */
 async function analyzeModel({ modelData, question, context }) {
-    const userMessage = `
-## BIM Model Data
-${modelData ? JSON.stringify(modelData, null, 2) : 'No model data provided'}
-
-## Additional Context
-${context || 'None'}
-
-## Question
-${question}
-`.trim();
-
+    const userMessage = [
+        '## BIM Model Data',
+        modelData ? JSON.stringify(modelData, null, 2) : 'No model data provided',
+        '',
+        '## Additional Context',
+        context || 'None',
+        '',
+        '## Question',
+        question,
+    ].join('\n');
     return callAI([{ role: 'user', content: userMessage }]);
 }
 
-/**
- * Summarize selected BIM elements
- */
 async function summarizeElements({ elements, urn }) {
-    const userMessage = `
-Please analyze and summarize the following BIM model elements.
-Model URN: ${urn || 'unknown'}
-
-Selected Elements:
-${JSON.stringify(elements, null, 2)}
-
-Provide:
-1. A brief summary of the selection
-2. Key properties and their values
-3. Any notable observations
-`.trim();
-
+    const userMessage = [
+        'Please analyze and summarize the following BIM model elements.',
+        `Model URN: ${urn || 'unknown'}`,
+        '',
+        'Selected Elements:',
+        JSON.stringify(elements, null, 2),
+        '',
+        'Provide:',
+        '1. A brief summary of the selection',
+        '2. Key properties and their values',
+        '3. Any notable observations',
+    ].join('\n');
     return callAI([{ role: 'user', content: userMessage }]);
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-const HarnessBrain = require('./harness-brain');
-
-/**
- * 사용자 메시지가 일상적인 대화(인사, 자기소개 등)인지 판단합니다.
- */
-function isSocialTalk(message) {
-    if (!message) return false;
-    const socialKeywords = ['안녕', '하이', '반가워', '누구', '기분', '날씨', '고마워', '감사', '잘가'];
-    return socialKeywords.some(keyword => message.includes(keyword));
-}
-
-/**
- * Multi-turn chat with optional system context and RAG
- */
 async function chat({ messages, systemContext }) {
     let finalSystemPrompt = SYSTEM_PROMPT;
-    const lastUserMessage = messages[messages.length - 1]?.content || "";
+    const lastUser = messages[messages.length - 1]?.content || '';
 
-    // [Social-Bypass] 일상 대화 감지 시 페르소나 완화
-    if (isSocialTalk(lastUserMessage)) {
-        finalSystemPrompt += `\n\n## [Social-Bypass Mode]
-사용자가 일상적인 대화를 건넸습니다. 당신은 지금 사용자의 '다정하고 유능한 파트너'예요. 
-- 전문적인 기능 안내나 거절 문구는 잠시 잊고, 친구와 수다를 떨듯 다정하게 대화에만 집중해 주세요.
-- 사용자가 힘들어하거나 지쳐 보이면 진심 어린 응원과 공감을 최우선으로 해 주세요. 
-- 말투는 부드러운 '해요 체'로 유지해 주세요.`;
-    }
+    if (isSocialTalk(lastUser)) finalSystemPrompt += SOCIAL_BYPASS_APPEND;
 
-    // [Harness-Brain] 지식 검색 및 컨텍스트 강화
+    // Harness-Brain RAG (선택)
     try {
-        if (lastUserMessage && !lastUserMessage.startsWith('[')) {
-            const knowledge = await HarnessBrain.searchKnowledge(lastUserMessage);
+        if (lastUser && !lastUser.startsWith('[')) {
+            const HarnessBrain = require('./harness-brain');
+            const knowledge = await HarnessBrain.searchKnowledge(lastUser);
             const mockIssues = await HarnessBrain.getProjectIssues('PROJ-123', 'MOCK_TOKEN');
-
             finalSystemPrompt = await HarnessBrain.enrichSystemPrompt(
-                finalSystemPrompt, // Base prompt may already have Social-Bypass instructions
+                finalSystemPrompt,
                 systemContext,
                 mockIssues
             );
-
             finalSystemPrompt += `\n\n## 사내 표준 지식 (RAG)\n${knowledge}`;
         }
     } catch (brainErr) {
-        console.warn('[AI-Brain] 지식 주입 중 오류 (기본 프롬프트 사용):', brainErr);
+        console.warn('[ai-brain] RAG 주입 실패 (기본 프롬프트 사용):', brainErr.message);
     }
 
     return callAI(messages, finalSystemPrompt);

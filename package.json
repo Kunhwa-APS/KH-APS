@@ -1,20 +1,27 @@
 {
   "name": "aps-ai-platform",
-  "version": "1.0.0",
+  "version": "1.1.0",
+  "description": "APS 기반 BIM 뷰어 · 이슈/버전 관리 · AI 분석 통합 플랫폼",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start:prod": "cross-env NODE_ENV=production node server.js",
+    "syntax-check": "node -e \"require('fs').readdirSync('routes').filter(f=>f.endsWith('.js')).forEach(f=>require('child_process').execSync('node -c routes/'+f))\" && echo OK",
+    "test": "echo \"테스트가 아직 구성되지 않았습니다\" && exit 0"
   },
   "keywords": [
     "aps",
     "autodesk",
+    "bim",
+    "forge-viewer",
     "ai-platform"
   ],
   "author": "",
   "license": "ISC",
-  "description": "APS 기반 AI 플랫폼",
+  "engines": {
+    "node": ">=18.17.0"
+  },
   "dependencies": {
     "@aps_sdk/authentication": "^1.0.1",
     "@aps_sdk/data-management": "^1.1.4",

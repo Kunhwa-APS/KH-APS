@@ -1,0 +1,341 @@
+/* =============================================================================
+   APS AI Platform — Design System v2
+   -------------------------------------------------------------------------
+   · Design Tokens (color, space, radius, shadow, motion, type)
+   · Dark-first, OKLCH-inspired palette, WCAG AA 대비 확보
+   · Premium feel: refined gradients, layered depth, 정돈된 타이포
+   · 기존 style.css 변수를 확장하며, 신규 .ds-* 유틸 컴포넌트 제공
+   ========================================================================== */
+
+:root {
+    /* ── Brand ───────────────────────────────────────────────────────── */
+    --ds-brand-50:  #eef2ff;
+    --ds-brand-100: #e0e7ff;
+    --ds-brand-300: #a5b4fc;
+    --ds-brand-400: #818cf8;
+    --ds-brand-500: #6366f1;
+    --ds-brand-600: #4f46e5;
+    --ds-brand-700: #4338ca;
+
+    --ds-accent-500: #0ea5e9;
+    --ds-accent-600: #0284c7;
+
+    /* ── Semantic ─────────────────────────────────────────────────────── */
+    --ds-success: #10b981;
+    --ds-success-soft: rgba(16, 185, 129, 0.12);
+    --ds-warning: #f59e0b;
+    --ds-warning-soft: rgba(245, 158, 11, 0.12);
+    --ds-danger: #ef4444;
+    --ds-danger-soft: rgba(239, 68, 68, 0.12);
+    --ds-info: #38bdf8;
+    --ds-info-soft: rgba(56, 189, 248, 0.12);
+
+    /* ── Neutrals (Dark) ─────────────────────────────────────────────── */
+    --ds-bg-0: #070810;   /* canvas (deepest) */
+    --ds-bg-1: #0b0d16;   /* app surface */
+    --ds-bg-2: #121526;   /* panel */
+    --ds-bg-3: #1a1f35;   /* elevated panel */
+    --ds-bg-4: #242a44;   /* interactive hover */
+
+    --ds-surface-glass: rgba(20, 24, 42, 0.68);
+    --ds-surface-glass-strong: rgba(20, 24, 42, 0.88);
+
+    --ds-border: rgba(255, 255, 255, 0.08);
+    --ds-border-strong: rgba(255, 255, 255, 0.14);
+    --ds-border-brand: rgba(99, 102, 241, 0.45);
+
+    --ds-fg: #f1f5f9;
+    --ds-fg-muted: #a1a9bd;
+    --ds-fg-subtle: #6b7395;
+    --ds-fg-disabled: #475069;
+
+    /* ── Gradients ───────────────────────────────────────────────────── */
+    --ds-grad-brand: linear-gradient(135deg, #6366f1 0%, #0ea5e9 100%);
+    --ds-grad-brand-soft: linear-gradient(135deg, rgba(99,102,241,.18), rgba(14,165,233,.10));
+    --ds-grad-aurora: radial-gradient(1200px 600px at 10% -20%, rgba(99,102,241,.18), transparent 60%),
+                      radial-gradient(900px 500px at 110% 10%, rgba(14,165,233,.12), transparent 60%),
+                      radial-gradient(700px 400px at 50% 120%, rgba(139,92,246,.10), transparent 60%);
+    --ds-grad-glow: radial-gradient(circle at 50% 0%, rgba(99,102,241,.25), transparent 70%);
+
+    /* ── Spacing scale (4pt base) ────────────────────────────────────── */
+    --ds-space-0: 0;
+    --ds-space-1: 4px;
+    --ds-space-2: 8px;
+    --ds-space-3: 12px;
+    --ds-space-4: 16px;
+    --ds-space-5: 20px;
+    --ds-space-6: 24px;
+    --ds-space-8: 32px;
+    --ds-space-10: 40px;
+    --ds-space-12: 48px;
+    --ds-space-16: 64px;
+
+    /* ── Radius ──────────────────────────────────────────────────────── */
+    --ds-r-xs: 4px;
+    --ds-r-sm: 8px;
+    --ds-r-md: 12px;
+    --ds-r-lg: 16px;
+    --ds-r-xl: 20px;
+    --ds-r-2xl: 28px;
+    --ds-r-full: 9999px;
+
+    /* ── Shadows (layered, plausible) ────────────────────────────────── */
+    --ds-shadow-xs: 0 1px 2px rgba(0,0,0,.35);
+    --ds-shadow-sm: 0 2px 6px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.25);
+    --ds-shadow-md: 0 8px 24px rgba(0,0,0,.38), 0 2px 6px rgba(0,0,0,.25);
+    --ds-shadow-lg: 0 20px 48px rgba(0,0,0,.45), 0 6px 16px rgba(0,0,0,.28);
+    --ds-shadow-xl: 0 32px 80px rgba(0,0,0,.55), 0 12px 28px rgba(0,0,0,.30);
+    --ds-shadow-brand: 0 8px 28px rgba(99,102,241,.35), 0 2px 8px rgba(14,165,233,.18);
+    --ds-ring: 0 0 0 3px rgba(99,102,241,.35);
+
+    /* ── Typography ──────────────────────────────────────────────────── */
+    --ds-font-sans: 'Inter', 'Pretendard', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+    --ds-font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+
+    --ds-text-xs:   11px;
+    --ds-text-sm:   12px;
+    --ds-text-base: 13.5px;
+    --ds-text-md:   15px;
+    --ds-text-lg:   17px;
+    --ds-text-xl:   20px;
+    --ds-text-2xl:  24px;
+    --ds-text-3xl:  30px;
+    --ds-text-4xl:  38px;
+
+    --ds-leading-tight: 1.2;
+    --ds-leading-snug:  1.35;
+    --ds-leading-normal:1.55;
+
+    --ds-tracking-tight: -0.015em;
+    --ds-tracking-wide:  0.06em;
+
+    /* ── Motion ──────────────────────────────────────────────────────── */
+    --ds-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ds-ease-in:  cubic-bezier(0.4, 0, 1, 1);
+    --ds-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    --ds-dur-fast: 120ms;
+    --ds-dur: 200ms;
+    --ds-dur-slow: 360ms;
+
+    /* ── Layout ──────────────────────────────────────────────────────── */
+    --ds-header-h: 60px;
+    --ds-sidebar-w: 288px;
+    --ds-panel-w: 376px;
+    --ds-content-max: 1440px;
+    --ds-z-dropdown: 1000;
+    --ds-z-modal: 1200;
+    --ds-z-toast: 1400;
+}
+
+/* =============================================================================
+   Accessibility: focus ring & motion
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+    * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: none;
+    box-shadow: var(--ds-ring);
+    border-radius: var(--ds-r-sm);
+}
+
+/* =============================================================================
+   Utility components — class prefix .ds-*
+   (기존 클래스를 건드리지 않고 새로 도입 가능)
+   ========================================================================== */
+
+/* ── Buttons ─────────────────────────────────────────────────────────── */
+.ds-btn {
+    --btn-bg: var(--ds-bg-3);
+    --btn-fg: var(--ds-fg);
+    --btn-bd: var(--ds-border);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--ds-space-2);
+    padding: 9px 14px;
+    font-family: inherit;
+    font-size: var(--ds-text-base);
+    font-weight: 600;
+    letter-spacing: var(--ds-tracking-tight);
+    color: var(--btn-fg);
+    background: var(--btn-bg);
+    border: 1px solid var(--btn-bd);
+    border-radius: var(--ds-r-md);
+    cursor: pointer;
+    user-select: none;
+    transition: transform var(--ds-dur-fast) var(--ds-ease-out),
+                background var(--ds-dur) var(--ds-ease-out),
+                border-color var(--ds-dur) var(--ds-ease-out),
+                box-shadow var(--ds-dur) var(--ds-ease-out),
+                color var(--ds-dur) var(--ds-ease-out);
+}
+.ds-btn:hover { background: var(--ds-bg-4); border-color: var(--ds-border-strong); }
+.ds-btn:active { transform: translateY(1px); }
+.ds-btn[disabled], .ds-btn.is-disabled { opacity: .5; cursor: not-allowed; pointer-events: none; }
+
+.ds-btn--primary {
+    --btn-bg: var(--ds-grad-brand);
+    --btn-fg: #fff;
+    --btn-bd: transparent;
+    box-shadow: var(--ds-shadow-brand);
+}
+.ds-btn--primary:hover { filter: brightness(1.08); transform: translateY(-1px); }
+
+.ds-btn--ghost {
+    --btn-bg: transparent;
+    --btn-bd: transparent;
+    --btn-fg: var(--ds-fg-muted);
+}
+.ds-btn--ghost:hover { --btn-fg: var(--ds-fg); background: rgba(255,255,255,.04); }
+
+.ds-btn--danger {
+    --btn-bg: var(--ds-danger-soft);
+    --btn-bd: rgba(239, 68, 68, 0.3);
+    --btn-fg: #fecaca;
+}
+.ds-btn--sm { padding: 6px 10px; font-size: var(--ds-text-sm); }
+.ds-btn--lg { padding: 12px 20px; font-size: var(--ds-text-md); }
+.ds-btn--icon { padding: 8px; aspect-ratio: 1; }
+
+/* ── Card ────────────────────────────────────────────────────────────── */
+.ds-card {
+    background: var(--ds-bg-2);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-r-lg);
+    box-shadow: var(--ds-shadow-sm);
+    padding: var(--ds-space-5);
+    transition: transform var(--ds-dur) var(--ds-ease-out), box-shadow var(--ds-dur) var(--ds-ease-out), border-color var(--ds-dur) var(--ds-ease-out);
+}
+.ds-card--hover:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--ds-shadow-lg);
+    border-color: var(--ds-border-strong);
+}
+.ds-card--glass {
+    background: var(--ds-surface-glass);
+    backdrop-filter: blur(20px) saturate(140%);
+    -webkit-backdrop-filter: blur(20px) saturate(140%);
+    border-color: var(--ds-border-strong);
+}
+
+/* ── Badges / Chips ──────────────────────────────────────────────────── */
+.ds-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    font-size: var(--ds-text-xs);
+    font-weight: 600;
+    letter-spacing: var(--ds-tracking-wide);
+    text-transform: uppercase;
+    color: var(--ds-fg-muted);
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-r-full);
+}
+.ds-badge--success { color: #a7f3d0; background: var(--ds-success-soft); border-color: rgba(16,185,129,.3); }
+.ds-badge--warning { color: #fcd34d; background: var(--ds-warning-soft); border-color: rgba(245,158,11,.3); }
+.ds-badge--danger  { color: #fecaca; background: var(--ds-danger-soft);  border-color: rgba(239,68,68,.3); }
+.ds-badge--info    { color: #bae6fd; background: var(--ds-info-soft);    border-color: rgba(56,189,248,.3); }
+.ds-badge--brand   { color: #c7d2fe; background: rgba(99,102,241,.15);  border-color: var(--ds-border-brand); }
+
+/* ── Input ───────────────────────────────────────────────────────────── */
+.ds-input,
+.ds-select,
+.ds-textarea {
+    width: 100%;
+    padding: 10px 12px;
+    font: inherit;
+    font-size: var(--ds-text-base);
+    color: var(--ds-fg);
+    background: var(--ds-bg-1);
+    border: 1px solid var(--ds-border);
+    border-radius: var(--ds-r-sm);
+    transition: border-color var(--ds-dur) var(--ds-ease-out), box-shadow var(--ds-dur) var(--ds-ease-out);
+}
+.ds-input::placeholder, .ds-textarea::placeholder { color: var(--ds-fg-subtle); }
+.ds-input:hover, .ds-select:hover, .ds-textarea:hover { border-color: var(--ds-border-strong); }
+.ds-input:focus, .ds-select:focus, .ds-textarea:focus { border-color: var(--ds-brand-500); box-shadow: var(--ds-ring); outline: none; }
+
+/* ── Divider / Kbd ───────────────────────────────────────────────────── */
+.ds-divider { height: 1px; background: var(--ds-border); margin: var(--ds-space-4) 0; }
+.ds-kbd {
+    font-family: var(--ds-font-mono);
+    font-size: var(--ds-text-xs);
+    padding: 2px 6px;
+    border: 1px solid var(--ds-border-strong);
+    border-bottom-width: 2px;
+    border-radius: var(--ds-r-xs);
+    background: var(--ds-bg-2);
+    color: var(--ds-fg-muted);
+}
+
+/* ── Skeleton loader ─────────────────────────────────────────────────── */
+.ds-skeleton {
+    position: relative;
+    overflow: hidden;
+    background: var(--ds-bg-3);
+    border-radius: var(--ds-r-sm);
+}
+.ds-skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.06), transparent);
+    transform: translateX(-100%);
+    animation: ds-shimmer 1.4s infinite;
+}
+@keyframes ds-shimmer { to { transform: translateX(100%); } }
+
+/* ── Toast container hook ───────────────────────────────────────────── */
+.ds-toast-stack {
+    position: fixed;
+    inset: auto var(--ds-space-5) var(--ds-space-5) auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ds-space-2);
+    z-index: var(--ds-z-toast);
+    pointer-events: none;
+}
+.ds-toast {
+    pointer-events: auto;
+    min-width: 280px;
+    padding: 12px 14px;
+    background: var(--ds-surface-glass-strong);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--ds-border-strong);
+    border-radius: var(--ds-r-md);
+    box-shadow: var(--ds-shadow-md);
+    color: var(--ds-fg);
+    font-size: var(--ds-text-sm);
+    animation: ds-toast-in var(--ds-dur) var(--ds-ease-spring);
+}
+@keyframes ds-toast-in {
+    from { opacity: 0; transform: translateY(8px) scale(.98); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Utility classes ─────────────────────────────────────────────────── */
+.ds-stack   { display: flex; flex-direction: column; gap: var(--ds-space-3); }
+.ds-row     { display: flex; align-items: center; gap: var(--ds-space-3); }
+.ds-spacer  { flex: 1; }
+.ds-grid    { display: grid; gap: var(--ds-space-4); }
+.ds-muted   { color: var(--ds-fg-muted); }
+.ds-subtle  { color: var(--ds-fg-subtle); }
+.ds-mono    { font-family: var(--ds-font-mono); }
+.ds-gradient-text {
+    background: var(--ds-grad-brand);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+.ds-sr-only {
+    position: absolute !important;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0);
+    white-space: nowrap; border: 0;
+}

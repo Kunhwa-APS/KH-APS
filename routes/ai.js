@@ -1,68 +1,57 @@
+/**
+ * AI Routes — OpenAI / Gemini / Ollama 통합 엔드포인트
+ */
 'use strict';
 
 const express = require('express');
-const router = express.Router();
 const aiService = require('../services/ai');
+const config = require('../config.js');
+const { asyncHandler, AppError, rateLimit } = require('../middleware');
 
-// ── POST /api/ai/analyze  → Analyze model metadata ─────────────────────────
-// Body: { modelData: {...}, question: "..." }
-router.post('/analyze', async (req, res, next) => {
-    try {
-        const { modelData, question, context } = req.body;
-        if (!question) {
-            return next({ status: 400, message: 'question is required' });
-        }
-        const result = await aiService.analyzeModel({ modelData, question, context });
-        res.json({ answer: result, timestamp: new Date().toISOString() });
-    } catch (err) {
-        console.error('[AI] analyze error:', err.message);
-        next({ status: 500, message: 'AI analysis failed: ' + err.message });
+const router = express.Router();
+
+// AI 엔드포인트는 비용이 높으므로 IP 당 분당 30회로 제한
+router.use(rateLimit({ windowMs: 60_000, max: 30, message: 'AI 요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.' }));
+
+// ── POST /api/ai/analyze ───────────────────────────────────────
+router.post('/analyze', asyncHandler(async (req, res) => {
+    const { modelData, question, context } = req.body || {};
+    if (!question) throw new AppError('question is required', 400, 'VALIDATION_ERROR');
+    const answer = await aiService.analyzeModel({ modelData, question, context });
+    res.json({ answer, timestamp: new Date().toISOString() });
+}));
+
+// ── POST /api/ai/summarize ─────────────────────────────────────
+router.post('/summarize', asyncHandler(async (req, res) => {
+    const { elements, urn } = req.body || {};
+    if (!Array.isArray(elements) || elements.length === 0) {
+        throw new AppError('elements array is required', 400, 'VALIDATION_ERROR');
     }
-});
+    const summary = await aiService.summarizeElements({ elements, urn });
+    res.json({ summary, timestamp: new Date().toISOString() });
+}));
 
-// ── POST /api/ai/summarize  → Summarize selected elements ──────────────────
-// Body: { elements: [...], urn: "..." }
-router.post('/summarize', async (req, res, next) => {
-    try {
-        const { elements, urn } = req.body;
-        if (!elements || !elements.length) {
-            return next({ status: 400, message: 'elements array is required' });
-        }
-        const summary = await aiService.summarizeElements({ elements, urn });
-        res.json({ summary, timestamp: new Date().toISOString() });
-    } catch (err) {
-        console.error('[AI] summarize error:', err.message);
-        next({ status: 500, message: 'AI summarization failed: ' + err.message });
+// ── POST /api/ai/chat ──────────────────────────────────────────
+router.post('/chat', asyncHandler(async (req, res) => {
+    const { messages, systemContext } = req.body || {};
+    if (!Array.isArray(messages) || messages.length === 0) {
+        throw new AppError('messages array is required', 400, 'VALIDATION_ERROR');
     }
-});
+    const reply = await aiService.chat({ messages, systemContext });
+    res.json({ reply, timestamp: new Date().toISOString() });
+}));
 
-// ── POST /api/ai/chat  → Multi-turn conversation ────────────────────────────
-// Body: { messages: [{role, content}], systemContext: "..." }
-router.post('/chat', async (req, res, next) => {
-    try {
-        const { messages, systemContext } = req.body;
-        if (!messages || !messages.length) {
-            return next({ status: 400, message: 'messages array is required' });
-        }
-        const reply = await aiService.chat({ messages, systemContext });
-        res.json({ reply, timestamp: new Date().toISOString() });
-    } catch (err) {
-        console.error('[AI] chat error:', err.message);
-        next({ status: 500, message: 'AI chat failed: ' + err.message });
-    }
-});
-
-// ── GET /api/ai/provider  → currently configured provider ──────────────────
+// ── GET /api/ai/provider ───────────────────────────────────────
 router.get('/provider', (req, res) => {
     res.json({
         provider: process.env.AI_PROVIDER || 'not configured',
-        hasOpenAI: !!process.env.OPENAI_API_KEY,
-        hasGemini: !!process.env.GEMINI_API_KEY,
+        hasOpenAI: !!config.ai.openaiKey,
+        hasGemini: !!config.ai.geminiKey,
         ollama: {
             configured: !!process.env.OLLAMA_HOST,
-            host: process.env.OLLAMA_HOST || 'http://localhost:11434',
-            model: process.env.OLLAMA_MODEL || 'llama3'
-        }
+            host: config.ai.ollamaHost,
+            model: process.env.OLLAMA_MODEL || 'llama3',
+        },
     });
 });
 

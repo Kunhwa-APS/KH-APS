@@ -1,3 +1,6 @@
+/**
+ * Clash Routes — APS Model Coordination API
+ */
 'use strict';
 
 const express = require('express');
@@ -5,66 +8,61 @@ const {
     authRefreshMiddleware,
     getClashContainers,
     getClashTests,
-    getClashResults
+    getClashResults,
 } = require('../services/aps.js');
+const { asyncHandler, AppError } = require('../middleware');
 
-let router = express.Router();
+const router = express.Router();
 
-/**
- * GET /api/clash/:projectId/containers
- * Fetches the Model Coordination container for a project.
- */
-router.get('/api/clash/:projectId/containers', authRefreshMiddleware, async (req, res) => {
+function normalizeApsError(err, label) {
+    const status = err.response?.status || 500;
+    const body = err.response?.data || {};
+    const msg = body.error || body.message || err.message || `${label} failed`;
+    console.error(`[Clash] ${label} error:`, status, body);
+    return new AppError(msg, status, 'APS_API_ERROR', body);
+}
+
+// ── GET /api/clash/:projectId/containers ───────────────────────
+router.get('/api/clash/:projectId/containers', authRefreshMiddleware, asyncHandler(async (req, res) => {
     try {
-        const { projectId } = req.params;
-        const { region } = req.query;
-        const containers = await getClashContainers(projectId, req.internalOAuthToken.access_token, region || 'US');
+        const containers = await getClashContainers(
+            req.params.projectId,
+            req.internalOAuthToken.access_token,
+            req.query.region || 'US'
+        );
         res.json(containers);
     } catch (err) {
-        const status = err.response?.status || 500;
-        const data = err.response?.data || { error: err.message };
-        console.error('[Clash] getClashContainers error:', status);
-        console.dir(data, { depth: null });
-        res.status(status).json(data);
+        throw normalizeApsError(err, 'getClashContainers');
     }
-});
+}));
 
-/**
- * GET /api/clash/:containerId/tests
- * Lists clash tests in a coordination container.
- */
-router.get('/api/clash/:containerId/tests', authRefreshMiddleware, async (req, res) => {
+// ── GET /api/clash/:containerId/tests ──────────────────────────
+router.get('/api/clash/:containerId/tests', authRefreshMiddleware, asyncHandler(async (req, res) => {
     try {
-        const { containerId } = req.params;
-        const { region } = req.query;
-        const tests = await getClashTests(containerId, req.internalOAuthToken.access_token, region || 'US');
+        const tests = await getClashTests(
+            req.params.containerId,
+            req.internalOAuthToken.access_token,
+            req.query.region || 'US'
+        );
         res.json(tests);
     } catch (err) {
-        const status = err.response?.status || 500;
-        const data = err.response?.data || { error: err.message };
-        console.error('[Clash] getClashTests error:', status);
-        console.dir(data, { depth: null });
-        res.status(status).json(data);
+        throw normalizeApsError(err, 'getClashTests');
     }
-});
+}));
 
-/**
- * GET /api/clash/:containerId/tests/:testId/results
- * Fetches detailed clash results for a test.
- */
-router.get('/api/clash/:containerId/tests/:testId/results', authRefreshMiddleware, async (req, res) => {
+// ── GET /api/clash/:containerId/tests/:testId/results ──────────
+router.get('/api/clash/:containerId/tests/:testId/results', authRefreshMiddleware, asyncHandler(async (req, res) => {
     try {
-        const { containerId, testId } = req.params;
-        const { region } = req.query;
-        const results = await getClashResults(containerId, testId, req.internalOAuthToken.access_token, region || 'US');
+        const results = await getClashResults(
+            req.params.containerId,
+            req.params.testId,
+            req.internalOAuthToken.access_token,
+            req.query.region || 'US'
+        );
         res.json(results);
     } catch (err) {
-        const status = err.response?.status || 500;
-        const data = err.response?.data || { error: err.message };
-        console.error('[Clash] getClashResults error:', status);
-        console.dir(data, { depth: null });
-        res.status(status).json(data);
+        throw normalizeApsError(err, 'getClashResults');
     }
-});
+}));
 
 module.exports = router;

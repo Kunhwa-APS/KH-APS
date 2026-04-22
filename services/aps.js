@@ -15,14 +15,32 @@ const service = module.exports = {};
 
 // ───────────────────────────────────────────────
 // 2-Legged OAuth (Server-to-Server)
+//   · 액세스 토큰을 프로세스 메모리에 캐시 — 만료 60초 전까지 재사용
+//   · 동시 요청시 토큰 발급 API가 1회만 호출되도록 inflight 공유
 // ───────────────────────────────────────────────
+let _twoLeggedCache = null;       // { token, expiresAt }
+let _twoLeggedInflight = null;    // Promise<string>
+const _SKEW_MS = 60 * 1000;
+
 service.getInternalTwoLeggedToken = async () => {
-    const credentials = await authenticationClient.getTwoLeggedToken(
-        APS_CLIENT_ID,
-        APS_CLIENT_SECRET,
-        INTERNAL_TOKEN_SCOPES
-    );
-    return credentials.access_token;
+    const now = Date.now();
+    if (_twoLeggedCache && _twoLeggedCache.expiresAt - _SKEW_MS > now) {
+        return _twoLeggedCache.token;
+    }
+    if (_twoLeggedInflight) return _twoLeggedInflight;
+
+    _twoLeggedInflight = authenticationClient
+        .getTwoLeggedToken(APS_CLIENT_ID, APS_CLIENT_SECRET, INTERNAL_TOKEN_SCOPES)
+        .then((credentials) => {
+            _twoLeggedCache = {
+                token: credentials.access_token,
+                expiresAt: Date.now() + credentials.expires_in * 1000,
+            };
+            return credentials.access_token;
+        })
+        .finally(() => { _twoLeggedInflight = null; });
+
+    return _twoLeggedInflight;
 };
 
 // ───────────────────────────────────────────────

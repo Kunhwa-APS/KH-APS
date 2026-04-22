@@ -4,18 +4,8 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kunhwa AI Platform | Autodesk Platform Services</title>
+    <title>APS AI Platform | Autodesk Platform Services</title>
     <meta name="description" content="APS 기반 AI 플랫폼 - BIM 모델 뷰어와 AI 분석을 통합한 스마트 플랫폼" />
-
-    <!-- ① FOUC 방지: CSS 로드 전에 즉시 다크 배경 적용 -->
-    <style>
-        html, body {
-            background: #0a0b0f !important;
-            color: #f1f5f9 !important;
-            margin: 0;
-            padding: 0;
-        }
-    </style>
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -42,15 +32,9 @@
     <!-- Cesium (VWorld 3D Map) -->
     <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css">
 
-    <!-- Design Tokens & Components -->
-    <link rel="stylesheet" href="/css/design-system.css?v=8" />
-
-    <!-- Existing Styles -->
-    <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/dashboard-premium.css?v=8" />
-
-    <!-- UI Refresh Layer (must load last to override) -->
-    <link rel="stylesheet" href="/css/ui-refresh.css?v=8" />
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="/css/style.css" />
+    <link rel="stylesheet" href="/css/dashboard-premium.css" />
 
     <!-- Three Mesh BVH for Narrow Phase Clash -->
     <script src="https://unpkg.com/three-mesh-bvh@0.7.3/build/index.umd.cjs"></script>
@@ -60,23 +44,27 @@
 </head>
 
 <body>
-    <!-- Accessibility: skip to main content -->
-    <a href="#main-content" class="ds-sr-only" onfocus="this.classList.remove('ds-sr-only')" onblur="this.classList.add('ds-sr-only')">본문으로 건너뛰기</a>
-
     <!-- ── Header ─────────────────────────────────────────────────────────── -->
-    <header class="header" role="banner">
+    <header class="header">
         <div class="header-left">
             <div class="logo">
-                <img src="/images/CI-KH로고.png" alt="건화 로고" style="height:32px; width:auto; object-fit:contain;" />
-                <span class="logo-text">Kunhwa <span class="logo-accent">AI</span> Platform</span>
+                <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+                    <rect width="32" height="32" rx="8" fill="url(#grad1)" />
+                    <path d="M8 24L16 8L24 24H8Z" fill="white" opacity="0.9" />
+                    <path d="M12 24L16 16L20 24H12Z" fill="white" />
+                    <defs>
+                        <linearGradient id="grad1" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                            <stop offset="0%" stop-color="#6366f1" />
+                            <stop offset="100%" stop-color="#0ea5e9" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <span class="logo-text">APS <span class="logo-accent">AI</span> Platform</span>
             </div>
         </div>
         <div class="header-right">
             <button id="header-dashboard-btn" class="header-map-btn active">
                 <i class="fas fa-chart-pie"></i> 대시보드
-            </button>
-            <button id="header-projects-btn" class="header-map-btn">
-                <i class="fas fa-list"></i> 프로젝트
             </button>
             <button id="header-map-btn" class="header-map-btn">
                 <i class="fas fa-map-marked-alt"></i> 🗺️ 지도
@@ -91,7 +79,7 @@
     </header>
 
     <!-- ── Main Layout ────────────────────────────────────────────────────── -->
-    <main class="main-layout" id="main-content" role="main">
+    <main class="main-layout">
 
         <!-- Left Sidebar: InspireTree Hub Browser ──────────────────────── -->
         <aside class="sidebar-left" id="sidebar-left">
@@ -121,14 +109,7 @@
         </aside>
 
         <!-- Resize Handle between sidebar and viewer -->
-        <div class="sidebar-resize-handle" id="sidebar-resize-handle">
-            <button class="left-collapse-btn" id="left-collapse-btn" title="Toggle Model Browser">
-                <span class="left-collapse-btn-label">Project</span>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                    <polyline points="9 18 15 12 9 6"></polyline>
-                </svg>
-            </button>
-        </div>
+        <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
 
         <!-- Center: Viewer ──────────────────────────────────────────────── -->
         <section class="viewer-container" id="viewer-container">
@@ -697,7 +678,6 @@
         <div class="panel-resizer-handle" id="panel-resizer-handle">
             <div class="resizer-knob"></div>
             <button class="ai-collapse-btn" id="ai-collapse-btn" title="Toggle Issues Panel">
-                <span class="ai-collapse-btn-label">Issue</span>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                     <polyline points="9 18 15 12 9 6"></polyline>
                 </svg>
@@ -960,30 +940,16 @@
             // ── Sidebar resize handle ───────────────────────────────────
             const handle = document.getElementById('sidebar-resize-handle');
             const sidebar = document.getElementById('sidebar-left');
-            const leftCollapseBtn = document.getElementById('left-collapse-btn');
             const MIN_W = 180;
             const MAX_W = 520;
             let dragging = false;
             let startX, startW;
 
-            // Helper: poke the viewer to re-measure after width animation
-            const triggerLeftViewerResize = () => {
-                try {
-                    if (window._viewer && window._viewer.resize) window._viewer.resize();
-                } catch (e) { /* noop */ }
-                window.dispatchEvent(new Event('resize'));
-            };
-
             handle.addEventListener('mousedown', (e) => {
-                // Don't start a drag if user clicked the collapse button
-                if (e.target.closest('#left-collapse-btn')) return;
-                // Don't allow resize while collapsed
-                if (sidebar.classList.contains('collapsed')) return;
                 dragging = true;
                 startX = e.clientX;
                 startW = sidebar.getBoundingClientRect().width;
                 handle.classList.add('dragging');
-                sidebar.classList.add('no-transition');
                 document.body.style.cursor = 'col-resize';
                 document.body.style.userSelect = 'none';
                 e.preventDefault();
@@ -1000,42 +966,9 @@
                 if (!dragging) return;
                 dragging = false;
                 handle.classList.remove('dragging');
-                sidebar.classList.remove('no-transition');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
-                localStorage.setItem('left-panel-width', parseInt(sidebar.style.width));
             });
-
-            // ── Left panel collapse/expand toggle ───────────────────────
-            if (leftCollapseBtn) {
-                leftCollapseBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const nowCollapsed = sidebar.classList.toggle('collapsed');
-                    localStorage.setItem('left-panel-collapsed', nowCollapsed);
-
-                    // When expanding, restore previous width if it was cleared
-                    if (!nowCollapsed && (!sidebar.style.width || sidebar.style.width === '0px')) {
-                        const savedW = localStorage.getItem('left-panel-width');
-                        sidebar.style.width = (savedW || 260) + 'px';
-                    }
-
-                    // Wait for transition to finish before nudging the viewer
-                    setTimeout(triggerLeftViewerResize, 350);
-                });
-            }
-
-            // Restore saved width + collapsed state on load
-            (() => {
-                const savedW = localStorage.getItem('left-panel-width');
-                if (savedW) {
-                    sidebar.classList.add('no-transition');
-                    sidebar.style.width = savedW + 'px';
-                    requestAnimationFrame(() => sidebar.classList.remove('no-transition'));
-                }
-                // Always start collapsed on page load
-                sidebar.classList.add('collapsed');
-                localStorage.setItem('left-panel-collapsed', 'true');
-            })();
 
             // Note: Right Panel Resize/Collapse and Table Resizing are now handled in diff-viewer.js (ResizingEngine)
         });

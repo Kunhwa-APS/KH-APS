@@ -1,3 +1,6 @@
+/**
+ * Diff Routes — APS Model Version Diff API
+ */
 'use strict';
 
 const express = require('express');
@@ -5,35 +8,39 @@ const {
     authRefreshMiddleware,
     requestVersionDiff,
     getDiffStatus,
-    getDiffResults
+    getDiffResults,
 } = require('../services/aps.js');
+const { asyncHandler, AppError } = require('../middleware');
 
-let router = express.Router();
+const router = express.Router();
 
-router.post('/api/diffs', authRefreshMiddleware, async (req, res, next) => {
+// URN이 base64로 인코딩된 경우 디코딩
+function ensureRawUrn(urn) {
+    if (!urn) return urn;
+    if (urn.startsWith('urn:')) return urn;
     try {
-        const { projectId, prevUrn, curUrn, region } = req.body;
-        console.log(`\n[ROUTE] POST /api/diffs`);
-        console.log(`[ROUTE] ProjectID: ${projectId}`);
-        console.log(`[ROUTE] Prev URN (Raw): ${prevUrn}`);
-        console.log(`[ROUTE] Cur URN (Raw): ${curUrn}`);
+        const decoded = Buffer.from(urn, 'base64').toString('utf8');
+        return decoded.startsWith('urn:') ? decoded : urn;
+    } catch {
+        return urn;
+    }
+}
 
-        if (!projectId || !prevUrn || !curUrn) {
-            return res.status(400).json({ error: 'Missing projectId, prevUrn, or curUrn.' });
-        }
+// 외부 APS 에러를 AppError로 정규화
+function normalizeApsError(err) {
+    const status = err.response?.status || 500;
+    const body = err.response?.data || {};
+    const message = body.error || body.message || err.message || 'APS API error';
+    return new AppError(message, status, 'APS_API_ERROR', body);
+}
 
-        // Standardize URN - ensure it's not base64 encoded by mistake
-        const ensureRawUrn = (urn) => {
-            if (urn.startsWith('urn:')) return urn;
-            try {
-                // If it looks like base64-encoded URN
-                const decoded = Buffer.from(urn, 'base64').toString('utf8');
-                return decoded.startsWith('urn:') ? decoded : urn;
-            } catch (e) {
-                return urn;
-            }
-        };
-
+// ── POST /api/diffs ────────────────────────────────────────────
+router.post('/api/diffs', authRefreshMiddleware, asyncHandler(async (req, res) => {
+    const { projectId, prevUrn, curUrn, region } = req.body;
+    if (!projectId || !prevUrn || !curUrn) {
+        throw new AppError('Missing projectId, prevUrn, or curUrn.', 400, 'VALIDATION_ERROR');
+    }
+    try {
         const result = await requestVersionDiff(
             projectId,
             ensureRawUrn(prevUrn),
@@ -43,50 +50,46 @@ router.post('/api/diffs', authRefreshMiddleware, async (req, res, next) => {
         );
         res.json(result);
     } catch (err) {
-        console.error('[ROUTE] Error in POST /api/diffs:', err.response?.data || err.message);
-        res.status(err.response?.status || 500).json(err.response?.data || { error: err.message });
+        throw normalizeApsError(err);
     }
-});
+}));
 
-router.get('/api/diffs/:projectId/:diffId', authRefreshMiddleware, async (req, res, next) => {
+// ── GET /api/diffs/:projectId/:diffId ──────────────────────────
+router.get('/api/diffs/:projectId/:diffId', authRefreshMiddleware, asyncHandler(async (req, res) => {
     try {
-        const { projectId, diffId } = req.params;
-        const { region } = req.query;
-        const status = await getDiffStatus(projectId, diffId, req.internalOAuthToken.access_token, region || 'US');
+        const status = await getDiffStatus(
+            req.params.projectId,
+            req.params.diffId,
+            req.internalOAuthToken.access_token,
+            req.query.region || 'US'
+        );
         res.json(status);
     } catch (err) {
-        res.status(err.response?.status || 500).json(err.response?.data || { error: err.message });
+        throw normalizeApsError(err);
     }
-});
+}));
 
-router.get('/api/diffs/:projectId/:diffId/results', authRefreshMiddleware, async (req, res, next) => {
+// ── GET /api/diffs/:projectId/:diffId/results ──────────────────
+router.get('/api/diffs/:projectId/:diffId/results', authRefreshMiddleware, asyncHandler(async (req, res) => {
     try {
-        const { projectId, diffId } = req.params;
-        const { region } = req.query;
-        const results = await getDiffResults(projectId, diffId, req.internalOAuthToken.access_token, region || 'US');
+        const results = await getDiffResults(
+            req.params.projectId,
+            req.params.diffId,
+            req.internalOAuthToken.access_token,
+            req.query.region || 'US'
+        );
 
-        // Grouping logic
-        const grouped = {
-            added: (results || []).filter(obj => obj.changeType === 1 || obj.changeType === 'added').map(obj => ({
-                dbId: obj.lmvId,
-                name: obj.name,
-                category: obj.category
-            })),
-            removed: (results || []).filter(obj => obj.changeType === 2 || obj.changeType === 'removed').map(obj => ({
-                dbId: obj.lmvId,
-                name: obj.name,
-                category: obj.category
-            })),
-            changed: (results || []).filter(obj => obj.changeType === 3 || obj.changeType === 'changed').map(obj => ({
-                dbId: obj.lmvId,
-                name: obj.name,
-                category: obj.category
-            }))
-        };
-        res.json(grouped);
+        const pickFields = (obj) => ({ dbId: obj.lmvId, name: obj.name, category: obj.category });
+        const isType = (obj, n, label) => obj.changeType === n || obj.changeType === label;
+
+        res.json({
+            added:   (results || []).filter((o) => isType(o, 1, 'added')).map(pickFields),
+            removed: (results || []).filter((o) => isType(o, 2, 'removed')).map(pickFields),
+            changed: (results || []).filter((o) => isType(o, 3, 'changed')).map(pickFields),
+        });
     } catch (err) {
-        res.status(err.response?.status || 500).json(err.response?.data || { error: err.message });
+        throw normalizeApsError(err);
     }
-});
+}));
 
 module.exports = router;

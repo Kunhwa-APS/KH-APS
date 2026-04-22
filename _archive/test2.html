@@ -4,18 +4,8 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Kunhwa AI Platform | Autodesk Platform Services</title>
+    <title>APS AI Platform | Autodesk Platform Services</title>
     <meta name="description" content="APS 기반 AI 플랫폼 - BIM 모델 뷰어와 AI 분석을 통합한 스마트 플랫폼" />
-
-    <!-- ① FOUC 방지: CSS 로드 전에 즉시 다크 배경 적용 -->
-    <style>
-        html, body {
-            background: #0a0b0f !important;
-            color: #f1f5f9 !important;
-            margin: 0;
-            padding: 0;
-        }
-    </style>
 
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -42,42 +32,33 @@
     <!-- Cesium (VWorld 3D Map) -->
     <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css">
 
-    <!-- Design Tokens & Components -->
-    <link rel="stylesheet" href="/css/design-system.css?v=8" />
-
-    <!-- Existing Styles -->
-    <link rel="stylesheet" href="/css/style.css?v=8" />
-    <link rel="stylesheet" href="/css/dashboard-premium.css?v=8" />
-
-    <!-- UI Refresh Layer (must load last to override) -->
-    <link rel="stylesheet" href="/css/ui-refresh.css?v=8" />
+    <!-- Custom Styles -->
+    <link rel="stylesheet" href="/css/style.css" />
 
     <!-- Three Mesh BVH for Narrow Phase Clash -->
     <script src="https://unpkg.com/three-mesh-bvh@0.7.3/build/index.umd.cjs"></script>
-    
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body>
-    <!-- Accessibility: skip to main content -->
-    <a href="#main-content" class="ds-sr-only" onfocus="this.classList.remove('ds-sr-only')" onblur="this.classList.add('ds-sr-only')">본문으로 건너뛰기</a>
-
     <!-- ── Header ─────────────────────────────────────────────────────────── -->
-    <header class="header" role="banner">
+    <header class="header">
         <div class="header-left">
-            <div class="logo">
-                <img src="/images/CI-KH로고.png" alt="건화 로고" style="height:32px; width:auto; object-fit:contain;" />
-                <span class="logo-text">Kunhwa <span class="logo-accent">AI</span> Platform</span>
+            <div class="logo" style="cursor: pointer;" onclick="window.location.href='/'">
+                <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+                    <rect width="32" height="32" rx="8" fill="url(#grad1)" />
+                    <path d="M8 24L16 8L24 24H8Z" fill="white" opacity="0.9" />
+                    <path d="M12 24L16 16L20 24H12Z" fill="white" />
+                    <defs>
+                        <linearGradient id="grad1" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
+                            <stop offset="0%" stop-color="#6366f1" />
+                            <stop offset="100%" stop-color="#0ea5e9" />
+                        </linearGradient>
+                    </defs>
+                </svg>
+                <span class="logo-text">APS <span class="logo-accent">AI</span> Platform</span>
             </div>
         </div>
         <div class="header-right">
-            <button id="header-dashboard-btn" class="header-map-btn active">
-                <i class="fas fa-chart-pie"></i> 대시보드
-            </button>
-            <button id="header-projects-btn" class="header-map-btn">
-                <i class="fas fa-list"></i> 프로젝트
-            </button>
             <button id="header-map-btn" class="header-map-btn">
                 <i class="fas fa-map-marked-alt"></i> 🗺️ 지도
             </button>
@@ -91,7 +72,7 @@
     </header>
 
     <!-- ── Main Layout ────────────────────────────────────────────────────── -->
-    <main class="main-layout" id="main-content" role="main">
+    <main class="main-layout">
 
         <!-- Left Sidebar: InspireTree Hub Browser ──────────────────────── -->
         <aside class="sidebar-left" id="sidebar-left">
@@ -121,14 +102,7 @@
         </aside>
 
         <!-- Resize Handle between sidebar and viewer -->
-        <div class="sidebar-resize-handle" id="sidebar-resize-handle">
-            <button class="left-collapse-btn" id="left-collapse-btn" title="Toggle Model Browser">
-                <span class="left-collapse-btn-label">Project</span>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                    <polyline points="9 18 15 12 9 6"></polyline>
-                </svg>
-            </button>
-        </div>
+        <div class="sidebar-resize-handle" id="sidebar-resize-handle"></div>
 
         <!-- Center: Viewer ──────────────────────────────────────────────── -->
         <section class="viewer-container" id="viewer-container">
@@ -204,139 +178,8 @@
             <!-- Map Panel -->
             <div id="map-container" style="display:none; width: 100%; height: 100%;"></div>
 
-            <!-- Premium Dashboard Container -->
-            <div id="dashboard-premium-container" class="dashboard-premium" style="display:flex;">
-                <!-- Full structure will be rendered via JS or hardcoded here -->
-                <div class="dashboard-premium-header">
-                    <div class="db-title-group">
-                        <h1 class="db-title">Project Overview</h1>
-                        <p class="db-subtitle">현재 진행 중인 프로젝트 현황을 실시간으로 확인하세요.</p>
-                    </div>
-                    <div class="db-actions">
-                        <div class="db-search">
-                            <i class="fas fa-search"></i>
-                            <input type="text" id="db-search-input" placeholder="프로젝트 검색..." />
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Stats Row -->
-                <div class="db-stats-row">
-                    <div class="db-stat-card">
-                        <div class="stat-icon" style="background: rgba(99, 102, 241, 0.15); color: #6366f1;">
-                            <i class="fas fa-layer-group"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h3>Total Projects</h3>
-                            <div class="stat-val" id="stat-total">0</div>
-                        </div>
-                    </div>
-                    <div class="db-stat-card">
-                        <div class="stat-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
-                            <i class="fas fa-play"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h3>In Progress</h3>
-                            <div class="stat-val" id="stat-active">0</div>
-                        </div>
-                    </div>
-                    <div class="db-stat-card">
-                        <div class="stat-icon" style="background: rgba(14, 165, 233, 0.15); color: #0ea5e9;">
-                            <i class="fas fa-check-circle"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h3>Completed</h3>
-                            <div class="stat-val" id="stat-completed">0</div>
-                        </div>
-                    </div>
-                    <div class="db-stat-card">
-                        <div class="stat-icon" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">
-                            <i class="fas fa-calendar-alt"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h3>Planned</h3>
-                            <div class="stat-val" id="stat-planned">0</div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="db-grid">
-                    <!-- Sidebar (Filters) -->
-                    <div class="db-sidebar">
-                        <div class="db-filter-box">
-                            <div class="filter-header">
-                                <i class="fas fa-filter"></i> Filters
-                            </div>
-                            <div class="filter-group">
-                                <label>카테고리</label>
-                                <select id="filter-category">
-                                    <option value="all">전체</option>
-                                    <option value="건축">건축</option>
-                                    <option value="토목">토목</option>
-                                    <option value="플랜트">플랜트</option>
-                                    <option value="인프라">인프라</option>
-                                </select>
-                            </div>
-                            <div class="filter-group">
-                                <label>위치 (지역)</label>
-                                <select id="filter-location">
-                                    <option value="all">전체 지역</option>
-                                    <option value="서울">서울</option>
-                                    <option value="경기">경기</option>
-                                    <option value="인천">인천</option>
-                                    <option value="부산">부산</option>
-                                    <option value="충청">충청</option>
-                                    <option value="강원">강원</option>
-                                    <option value="해외">해외</option>
-                                </select>
-                            </div>
-                            <div class="filter-group">
-                                <label>진행 상태</label>
-                                <select id="filter-status">
-                                    <option value="all">전체 상태</option>
-                                    <option value="진행중">진행 중</option>
-                                    <option value="완료">완료</option>
-                                    <option value="예정">예정</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="db-chart-box">
-                            <h3 class="chart-title">Category Distribution</h3>
-                            <div class="chart-container-sm">
-                                <canvas id="chart-category"></canvas>
-                            </div>
-                        </div>
-                        <div class="db-chart-box">
-                            <h3 class="chart-title">Location Distribution</h3>
-                            <div class="chart-container-sm">
-                                <canvas id="chart-location"></canvas>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Main Grid Content -->
-                    <div class="db-content">
-                        <!-- Controls -->
-                        <div class="db-controls">
-                            <span class="db-count">검색된 프로젝트: <strong id="db-project-count">0</strong>개</span>
-                            <div class="db-sort">
-                                <select id="sort-projects">
-                                    <option value="newest">최신순</option>
-                                    <option value="name">이름순</option>
-                                    <option value="oldest">오래된순</option>
-                                </select>
-                            </div>
-                        </div>
-                        <!-- Project Cards Container -->
-                        <div class="db-project-grid" id="db-project-grid">
-                            <!-- Cards inserted here by JS -->
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Project Selection Dashboard (Legacy) -->
-            <div id="project-selection-dashboard" class="project-dashboard" style="display:none;">
+            <!-- Project Selection Dashboard -->
+            <div id="project-selection-dashboard" class="project-dashboard">
                 <div class="dashboard-header">
                     <div class="greeting-section">
                         <h1 id="user-greeting">사용자님, 환영합니다.</h1>
@@ -697,7 +540,6 @@
         <div class="panel-resizer-handle" id="panel-resizer-handle">
             <div class="resizer-knob"></div>
             <button class="ai-collapse-btn" id="ai-collapse-btn" title="Toggle Issues Panel">
-                <span class="ai-collapse-btn-label">Issue</span>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                     <polyline points="9 18 15 12 9 6"></polyline>
                 </svg>
@@ -941,8 +783,6 @@
     <script src="/js/explorer.js?v=20260330_1752" type="module"></script>
     <!-- Navisworks-style Clash Detective Extension -->
     <script src="/js/NavisClashExtension.js"></script>
-    <!-- Premium Dashboard Logic -->
-    <script src="/js/dashboard-premium.js?v=1.0" type="module"></script>
     <!-- main.js wires viewer + tree as ES6 module -->
     <script src="/js/main.js?v=20260330_1721" type="module"></script>
 
@@ -960,30 +800,16 @@
             // ── Sidebar resize handle ───────────────────────────────────
             const handle = document.getElementById('sidebar-resize-handle');
             const sidebar = document.getElementById('sidebar-left');
-            const leftCollapseBtn = document.getElementById('left-collapse-btn');
             const MIN_W = 180;
             const MAX_W = 520;
             let dragging = false;
             let startX, startW;
 
-            // Helper: poke the viewer to re-measure after width animation
-            const triggerLeftViewerResize = () => {
-                try {
-                    if (window._viewer && window._viewer.resize) window._viewer.resize();
-                } catch (e) { /* noop */ }
-                window.dispatchEvent(new Event('resize'));
-            };
-
             handle.addEventListener('mousedown', (e) => {
-                // Don't start a drag if user clicked the collapse button
-                if (e.target.closest('#left-collapse-btn')) return;
-                // Don't allow resize while collapsed
-                if (sidebar.classList.contains('collapsed')) return;
                 dragging = true;
                 startX = e.clientX;
                 startW = sidebar.getBoundingClientRect().width;
                 handle.classList.add('dragging');
-                sidebar.classList.add('no-transition');
                 document.body.style.cursor = 'col-resize';
                 document.body.style.userSelect = 'none';
                 e.preventDefault();
@@ -1000,42 +826,9 @@
                 if (!dragging) return;
                 dragging = false;
                 handle.classList.remove('dragging');
-                sidebar.classList.remove('no-transition');
                 document.body.style.cursor = '';
                 document.body.style.userSelect = '';
-                localStorage.setItem('left-panel-width', parseInt(sidebar.style.width));
             });
-
-            // ── Left panel collapse/expand toggle ───────────────────────
-            if (leftCollapseBtn) {
-                leftCollapseBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    const nowCollapsed = sidebar.classList.toggle('collapsed');
-                    localStorage.setItem('left-panel-collapsed', nowCollapsed);
-
-                    // When expanding, restore previous width if it was cleared
-                    if (!nowCollapsed && (!sidebar.style.width || sidebar.style.width === '0px')) {
-                        const savedW = localStorage.getItem('left-panel-width');
-                        sidebar.style.width = (savedW || 260) + 'px';
-                    }
-
-                    // Wait for transition to finish before nudging the viewer
-                    setTimeout(triggerLeftViewerResize, 350);
-                });
-            }
-
-            // Restore saved width + collapsed state on load
-            (() => {
-                const savedW = localStorage.getItem('left-panel-width');
-                if (savedW) {
-                    sidebar.classList.add('no-transition');
-                    sidebar.style.width = savedW + 'px';
-                    requestAnimationFrame(() => sidebar.classList.remove('no-transition'));
-                }
-                // Always start collapsed on page load
-                sidebar.classList.add('collapsed');
-                localStorage.setItem('left-panel-collapsed', 'true');
-            })();
 
             // Note: Right Panel Resize/Collapse and Table Resizing are now handled in diff-viewer.js (ResizingEngine)
         });

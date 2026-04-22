@@ -1,47 +1,25 @@
+/**
+ * Memos Routes — 버전별 메모 저장 · 조회
+ */
 'use strict';
 
 const express = require('express');
 const { authRefreshMiddleware } = require('../services/aps.js');
 const { saveMemo, getMemo } = require('../services/memos.js');
+const { asyncHandler, AppError } = require('../middleware');
 
-let router = express.Router();
+const router = express.Router();
 
-/**
- * POST /api/version-memo
- * Saves a memo for a specific version.
- */
-router.post('/api/version-memo', authRefreshMiddleware, async (req, res) => {
-    try {
-        const { versionUrn, memoText } = req.body;
-        console.log('[Memos] POST /api/version-memo - URN:', versionUrn);
+// ── POST /api/version-memo ─────────────────────────────────────
+router.post('/api/version-memo', authRefreshMiddleware, asyncHandler(async (req, res) => {
+    const { versionUrn, memoText } = req.body || {};
+    if (!versionUrn) throw new AppError('versionUrn is required', 400, 'VALIDATION_ERROR');
+    res.json(saveMemo(versionUrn, memoText));
+}));
 
-        if (!versionUrn) {
-            return res.status(400).json({ error: 'versionUrn is required' });
-        }
-
-        const memo = saveMemo(versionUrn, memoText);
-        res.json(memo);
-    } catch (err) {
-        console.error('[Memos] POST Error:', err.message);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-/**
- * GET /api/version-memo/:urn
- * Retrieves a memo for a specific version.
- */
-router.get('/api/version-memo/:urn', authRefreshMiddleware, async (req, res) => {
-    try {
-        const versionUrn = req.params.urn;
-        console.log('[Memos] GET /api/version-memo/:urn - URN:', versionUrn);
-
-        const memo = getMemo(versionUrn);
-        res.json(memo);
-    } catch (err) {
-        console.error('[Memos] GET Error:', err.message);
-        res.status(500).json({ error: err.message });
-    }
-});
+// ── GET /api/version-memo/:urn ────────────────────────────────
+router.get('/api/version-memo/:urn', authRefreshMiddleware, asyncHandler(async (req, res) => {
+    res.json(getMemo(req.params.urn));
+}));
 
 module.exports = router;

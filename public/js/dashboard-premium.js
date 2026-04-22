@@ -64,7 +64,7 @@ export async function renderPremiumDashboard(hubsData) {
         // Deterministic mock generation based on index and name length for consistency across reloads
         const hash = p.name.length + index * 3;
         const status = MOCK_STATUSES[hash % MOCK_STATUSES.length];
-        
+
         let dateObj = new Date(p.attributes?.createTime || p.created || Date.now());
         if (!p.created && !p.attributes?.createTime) {
             // Give some random old dates if no creation date exists
@@ -160,7 +160,7 @@ function renderCards() {
     filteredProjects.forEach(p => {
         const card = document.createElement('div');
         card.className = 'db-project-card';
-        
+
         let statusClass = 'planned';
         if (p.mockStatus === '진행중') statusClass = 'active';
         else if (p.mockStatus === '완료') statusClass = 'completed';
@@ -193,7 +193,7 @@ function renderCards() {
  */
 async function handleProjectClick(project) {
     console.log('[Dashboard Premium] Card Clicked:', project.name);
-    
+
     // Hide dashboard
     document.getElementById('dashboard-premium-container').style.display = 'none';
 
@@ -272,13 +272,13 @@ function updateCharts() {
 
     const ctxCat = document.getElementById('chart-category');
     const ctxLoc = document.getElementById('chart-location');
-    
+
     if (!ctxCat || !ctxLoc) return;
 
     // Aggregate data
     const catData = {};
     const locData = {};
-    
+
     filteredProjects.forEach(p => {
         catData[p.mockCategory] = (catData[p.mockCategory] || 0) + 1;
         locData[p.mockLocation] = (locData[p.mockLocation] || 0) + 1;
@@ -313,7 +313,7 @@ function updateCharts() {
 
     // 2. Location Chart (Horizontal Bar)
     if (chartLocationInstance) chartLocationInstance.destroy();
-    
+
     // Sort locations by count
     const sortedLocs = Object.keys(locData).sort((a,b) => locData[b] - locData[a]);
     const locValues = sortedLocs.map(k => locData[k]);

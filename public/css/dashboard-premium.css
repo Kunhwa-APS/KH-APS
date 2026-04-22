@@ -8,14 +8,14 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: var(--bg-primary); /* Use main bg */
+    background: var(--ds-bg-1, #0b0d16) !important;
     z-index: 50; /* Above viewer but below modals */
     display: flex;
     flex-direction: column;
     overflow-y: auto;
     padding: 24px;
     gap: 20px;
-    color: var(--text-primary);
+    color: var(--ds-fg, #f1f5f9) !important;
 }
 
 /* Hide scrollbar for a cleaner look, or style it */
