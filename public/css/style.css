@@ -327,10 +327,10 @@ body {
 /* When collapsed, guarantee the button is hit-testable above the viewer/dashboard */
 .sidebar-left.collapsed + .sidebar-resize-handle {
     overflow: visible;
-    z-index: 1000;
+    z-index: 1100;
 }
 .sidebar-left.collapsed + .sidebar-resize-handle .left-collapse-btn {
-    z-index: 1001;
+    z-index: 1101;
 }
 
 .left-collapse-btn:hover {
@@ -481,7 +481,10 @@ body {
 
 .sidebar-right.collapsed~.panel-resizer-handle,
 .panel-resizer-handle:has(> .ai-collapse-btn) {
-    z-index: 1000;
+    z-index: 1100;
+}
+.sidebar-right.collapsed~.panel-resizer-handle .ai-collapse-btn {
+    z-index: 1101;
 }
 
 .ai-collapse-btn:hover {

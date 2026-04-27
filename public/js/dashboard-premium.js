@@ -6,21 +6,124 @@ let allProjectsData = [];
 let filteredProjects = [];
 let chartCategoryInstance = null;
 let chartLocationInstance = null;
+let chartLocationTopInstance = null;
+let chartYearInstance = null;
+let chartStatusInstance = null;
 
 // Categories & Locations for mock data generation
-const MOCK_CATEGORIES = ['건축', '토목', '플랜트', '인프라'];
+const MOCK_CATEGORIES = ['도로', '상하수도', '터널', '단지', '교량', '철도', 'Other'];
 const MOCK_LOCATIONS = ['서울', '경기', '인천', '부산', '충청', '강원', '해외'];
 const MOCK_STATUSES = ['진행중', '완료', '예정'];
+
+/**
+ * Map ACC HQ `type` (project type) to Korean category.
+ * Returns null when type is empty/unknown so caller can fallback.
+ */
+/**
+ * ACC `유형` (type) 필드 매핑 — 한글/영문 둘 다 지원.
+ *
+ *  한글 (ACC UI)              |  영문 (HQ API 반환값)               → 매핑
+ *  ─────────────────────────────────────────────────────────────────
+ *  데모프로젝트               |  Demonstration / Demo Project       → Demo
+ *  레일                       |  Rail / Railway                     → 철도
+ *  교통 시설                  |  Transportation Facilities          → 단지
+ *  터널                       |  Tunnels                            → 터널
+ *  브리지                     |  Bridges                            → 교량
+ *  폐수 / 하수 / 상수도       |  Wastewater / Sewage / Water Supply → 상하수도
+ *  거리 / 도로 / 고속도로     |  Streets / Roads / Highways         → 도로
+ *  그 외                      |  —                                  → Other
+ */
+function mapCategoryFromType(type) {
+    if (!type) return null;
+    const raw = String(type).trim();
+    const t = raw.toLowerCase();
+
+    // Demonstration Project / 데모프로젝트 → Other (사용자 요청으로 Demo 카테고리 폐지)
+    if (/데모/.test(raw) || /demonstration|demo/.test(t)) return 'Other';
+
+    // Rail / Railway / 레일 → 철도 (일반 'transport' 매칭보다 먼저)
+    if (/레일|철도/.test(raw) || /\brail(way|road)?\b|\brail\b/.test(t)) return '철도';
+
+    // Transportation Facilities / 교통 시설 → 단지 (일반 '교통/transport' 매칭보다 먼저)
+    if (/교통\s*시설/.test(raw) || /transportation/.test(t)) return '단지';
+
+    // Tunnels / 터널 → 터널
+    if (/터널/.test(raw) || /tunnel/.test(t)) return '터널';
+
+    // Bridges / 브리지 → 교량
+    if (/브리지|교량/.test(raw) || /bridge/.test(t)) return '교량';
+
+    // Wastewater / Sewage / Water Supply / 폐수 / 하수 / 상수도 → 상하수도
+    if (/폐수|하수|상수도|상하수도/.test(raw) || /wastewater|sewage|sewer|water\s*supply|water/.test(t)) return '상하수도';
+
+    // Streets / Roads / Highways / 거리 / 교통 / 고속도로 → 도로
+    if (/거리|도로|교통|고속도로/.test(raw) || /street|\broad(s|way)?\b|highway|transport/.test(t)) return '도로';
+
+    // 그 외 모든 유형 → Other
+    return 'Other';
+}
+
+/**
+ * Map ACC HQ address (state/city/country) to Korean region label.
+ * Returns null when address is empty/unknown.
+ */
+function mapLocationFromAddress(stateOrProvince, city, country, addressLine1, addressLine2) {
+    // Scan every address-related field (HQ may populate only addressLine1 for manually-entered addresses)
+    const src = [stateOrProvince, city, addressLine1, addressLine2].filter(Boolean).join(' ').trim();
+    if (!src && !country) return null;
+
+    const s = src.toLowerCase();
+    const countryLc = (country || '').toLowerCase();
+
+    // Korean region detection — check FIRST so "Korea, Republic of" country doesn't short-circuit
+    if (/seoul|서울/.test(s)) return '서울';
+    if (/gyeonggi|경기|수원|안산|성남|고양|용인|부천|안양|의정부|평택|시흥|화성|김포|남양주|광명|군포|하남|이천|오산/.test(s)) return '경기';
+    if (/incheon|인천/.test(s)) return '인천';
+    if (/busan|부산/.test(s)) return '부산';
+    if (/chungcheong|chungbuk|chungnam|daejeon|sejong|충청|충북|충남|대전|세종/.test(s)) return '충청';
+    if (/gangwon|강원/.test(s)) return '강원';
+    if (/gyeongsang|gyeongbuk|gyeongnam|daegu|ulsan|경상|경북|경남|대구|울산/.test(s)) return '경상';
+    if (/jeolla|jeonbuk|jeonnam|gwangju|전라|전북|전남|광주|군산|전주|익산|여수|순천/.test(s)) return '전라';
+    if (/jeju|제주/.test(s)) return '제주';
+
+    // Outside Korea → 해외
+    const koreaTokens = /korea|대한민국|한국|republic of korea|^kr$/i;
+    if (country && !koreaTokens.test(countryLc)) return '해외';
+
+    return src ? '해외' : null;
+}
+
+/**
+ * Map ACC HQ `status` (+ end date) to Korean status label.
+ */
+function mapStatusFromACC(status, endDate) {
+    if (!status) return null;
+    const s = String(status).toLowerCase();
+    if (/archived|completed|closed/.test(s)) return '완료';
+    if (/pending|suspended|template/.test(s)) return '예정';
+    if (/active|in[\s_-]*progress|ongoing/.test(s)) {
+        // If end date passed, treat as 완료
+        if (endDate) {
+            const ed = new Date(endDate);
+            if (!isNaN(ed.getTime()) && ed < new Date()) return '완료';
+        }
+        return '진행중';
+    }
+    return null;
+}
 
 /**
  * Main entry point to render the premium dashboard.
  * @param {Array} hubsData - Fetched hubs from API (optional)
  */
-export async function renderPremiumDashboard(hubsData) {
+export async function renderPremiumDashboard(hubsData, { refresh = false } = {}) {
     const gridContainer = document.getElementById('db-project-grid');
     if (!gridContainer) return;
 
     gridContainer.innerHTML = '<div style="padding:20px; color:var(--text-muted);"><i class="fas fa-spinner fa-spin"></i> 프로젝트 데이터를 불러오는 중...</div>';
+
+    // Remember for the refresh button
+    window._lastDashboardHubs = hubsData;
 
     // 1. Fetch Hubs if not provided
     if (!hubsData || hubsData.length === 0) {
@@ -38,7 +141,7 @@ export async function renderPremiumDashboard(hubsData) {
     try {
         const projectPromises = hubsData.map(async (hub) => {
             try {
-                const projectsResponse = await fetch(`/api/hubs/${hub.id}/projects`);
+                const projectsResponse = await fetch(`/api/hubs/${hub.id}/projects${refresh ? '?refresh=1' : ''}`);
                 const projects = await projectsResponse.json();
                 return projects.map(p => ({ ...p, hubName: hub.name, hubId: hub.id }));
             } catch (err) {
@@ -59,34 +162,73 @@ export async function renderPremiumDashboard(hubsData) {
         return;
     }
 
-    // 2. Enrich with Mock Data for Dashboard Features
+    // 2. Enrich with ACC/Forma project metadata (real values when present, fallback to deterministic mock)
     allProjectsData = fetchedProjects.map((p, index) => {
-        // Deterministic mock generation based on index and name length for consistency across reloads
         const hash = p.name.length + index * 3;
-        const status = MOCK_STATUSES[hash % MOCK_STATUSES.length];
+        const fallbackStatus = MOCK_STATUSES[hash % MOCK_STATUSES.length];
 
-        let dateObj = new Date(p.attributes?.createTime || p.created || Date.now());
-        if (!p.created && !p.attributes?.createTime) {
-            // Give some random old dates if no creation date exists
-            dateObj = new Date(Date.now() - (hash * 1000000000));
+        // Date: prefer HQ start_date, then createTime
+        const dateSrc = p.startDate || p.attributes?.createTime || p.createdAt || null;
+        let dateObj = dateSrc ? new Date(dateSrc) : new Date(Date.now() - (hash * 1000000000));
+        if (isNaN(dateObj.getTime())) dateObj = new Date();
+
+        // ACC '유형' 필드만 사용 (이름 기반 추측 없음)
+        const realCategory = mapCategoryFromType(p.projectType) || 'Other';
+        const realLocation = mapLocationFromAddress(p.stateOrProvince, p.city, p.country, p.addressLine1, p.addressLine2);
+        const realStatus = mapStatusFromACC(p.projectStatus, p.endDate);
+
+        // Debug: dump raw ACC fields so we can see why mapping fell through
+        console.debug(`[proj] "${p.name}" | type="${p.projectType || ''}" | state="${p.stateOrProvince || ''}" | city="${p.city || ''}" | addr1="${p.addressLine1 || ''}" | country="${p.country || ''}" | →cat=${realCategory || 'MISS'} →loc=${realLocation || 'MISS'}`);
+
+        const category = realCategory || MOCK_CATEGORIES[hash % MOCK_CATEGORIES.length];
+        const location = realLocation || MOCK_LOCATIONS[(hash * 2) % MOCK_LOCATIONS.length];
+        const status = realStatus || fallbackStatus;
+
+        const startStr = `${dateObj.getFullYear()}.${String(dateObj.getMonth() + 1).padStart(2, '0')}`;
+        let endStr = '진행중';
+        if (p.endDate) {
+            const ed = new Date(p.endDate);
+            if (!isNaN(ed.getTime())) endStr = `${ed.getFullYear()}.${String(ed.getMonth() + 1).padStart(2, '0')}`;
+        } else if (status === '완료') {
+            endStr = `${dateObj.getFullYear() + 1}.12`;
         }
 
         return {
             ...p,
-            mockCategory: MOCK_CATEGORIES[hash % MOCK_CATEGORIES.length],
-            mockLocation: MOCK_LOCATIONS[(hash * 2) % MOCK_LOCATIONS.length],
+            mockCategory: category,
+            mockLocation: location,
             mockStatus: status,
             mockDate: dateObj,
-            mockPeriod: `${dateObj.getFullYear()}.${String(dateObj.getMonth()+1).padStart(2,'0')} ~ ${status === '완료' ? (dateObj.getFullYear()+1)+'.12' : '진행중'}`,
-            projectNum: p.id.slice(-8).toUpperCase()
+            mockStartDate: dateObj.toISOString().slice(0, 10),
+            mockPeriod: `${startStr} ~ ${endStr}`,
+            projectNum: (p.jobNumber && String(p.jobNumber).trim()) || '',
+            // Track provenance for debugging/UI badges
+            _sourceCategory: realCategory ? 'acc' : 'mock',
+            _sourceLocation: realLocation ? 'acc' : 'mock',
+            _sourceStatus: realStatus ? 'acc' : 'mock',
         };
     });
 
     filteredProjects = [...allProjectsData];
 
+    // Populate year filter options from available project data
+    populateYearFilter();
+
     // 3. Initialize UI
     bindFilterEvents();
     applyFiltersAndSort(); // This will render cards, update stats, and draw charts
+}
+
+function populateYearFilter() {
+    const sel = document.getElementById('filter-year');
+    if (!sel) return;
+    const years = [...new Set(allProjectsData
+        .map(p => (p.mockStartDate || '').slice(0, 4))
+        .filter(y => y)
+    )].sort((a, b) => b.localeCompare(a));
+    // Preserve 'all' option and refill
+    sel.innerHTML = '<option value="all">전체 연도</option>' +
+        years.map(y => `<option value="${y}">${y}년</option>`).join('');
 }
 
 /**
@@ -105,7 +247,31 @@ function bindFilterEvents() {
     if (filterCat) filterCat.addEventListener('change', updateTrigger);
     if (filterLoc) filterLoc.addEventListener('change', updateTrigger);
     if (filterStatus) filterStatus.addEventListener('change', updateTrigger);
+    const filterYear = document.getElementById('filter-year');
+    if (filterYear) filterYear.addEventListener('change', updateTrigger);
     if (sortSelect) sortSelect.addEventListener('change', updateTrigger);
+
+    // Refresh button — bypass server cache and re-fetch from ACC
+    const refreshBtn = document.getElementById('db-refresh-btn');
+    if (refreshBtn && !refreshBtn._bound) {
+        refreshBtn._bound = true;
+        refreshBtn.addEventListener('click', async () => {
+            if (refreshBtn._loading) return;
+            refreshBtn._loading = true;
+            refreshBtn.classList.add('loading');
+            const icon = refreshBtn.querySelector('i');
+            if (icon) icon.classList.add('fa-spin');
+            try {
+                await renderPremiumDashboard(window._lastDashboardHubs, { refresh: true });
+            } catch (e) {
+                console.error('Refresh failed:', e);
+            } finally {
+                refreshBtn._loading = false;
+                refreshBtn.classList.remove('loading');
+                if (icon) icon.classList.remove('fa-spin');
+            }
+        });
+    }
 }
 
 /**
@@ -116,15 +282,17 @@ function applyFiltersAndSort() {
     const catVal = document.getElementById('filter-category')?.value || 'all';
     const locVal = document.getElementById('filter-location')?.value || 'all';
     const statusVal = document.getElementById('filter-status')?.value || 'all';
+    const yearVal = document.getElementById('filter-year')?.value || 'all';
     const sortVal = document.getElementById('sort-projects')?.value || 'newest';
 
     filteredProjects = allProjectsData.filter(p => {
-        const matchSearch = p.name.toLowerCase().includes(searchTerm) || p.projectNum.toLowerCase().includes(searchTerm);
+        const matchSearch = p.name.toLowerCase().includes(searchTerm) || (p.projectNum || '').toLowerCase().includes(searchTerm);
         const matchCat = catVal === 'all' || p.mockCategory === catVal;
         const matchLoc = locVal === 'all' || p.mockLocation === locVal;
         const matchStatus = statusVal === 'all' || p.mockStatus === statusVal;
+        const matchYear = yearVal === 'all' || (p.mockStartDate || '').startsWith(yearVal);
 
-        return matchSearch && matchCat && matchLoc && matchStatus;
+        return matchSearch && matchCat && matchLoc && matchStatus && matchYear;
     });
 
     // Sorting
@@ -171,8 +339,8 @@ function renderCards() {
                 <span class="badge-status ${statusClass}">${p.mockStatus}</span>
             </div>
             <div class="card-meta">
-                <div class="meta-item"><i class="fas fa-hashtag"></i> <span>${p.projectNum}</span></div>
-                <div class="meta-item"><i class="fas fa-tags"></i> <span>${p.mockCategory} 프로젝트</span></div>
+                ${p.projectNum ? `<div class="meta-item" title="프로젝트 번호"><i class="fas fa-hashtag"></i> <span>${p.projectNum}</span></div>` : ''}
+                <div class="meta-item"><i class="fas fa-tags"></i> <span>${p.mockCategory}</span></div>
                 <div class="meta-item"><i class="fas fa-map-marker-alt"></i> <span>${p.mockLocation}</span></div>
                 <div class="meta-item"><i class="far fa-calendar-alt"></i> <span>${p.mockPeriod}</span></div>
             </div>
@@ -239,10 +407,14 @@ function updateStats() {
 
     if (!elTotal) return;
 
-    let total = allProjectsData.length;
-    let active = allProjectsData.filter(p => p.mockStatus === '진행중').length;
-    let completed = allProjectsData.filter(p => p.mockStatus === '완료').length;
-    let planned = allProjectsData.filter(p => p.mockStatus === '예정').length;
+    // 필터(카테고리/위치/연도/상태) 적용 결과 기준으로 카운트
+    const source = (filteredProjects && filteredProjects.length !== undefined)
+        ? filteredProjects
+        : allProjectsData;
+    let total = source.length;
+    let active = source.filter(p => p.mockStatus === '진행중').length;
+    let completed = source.filter(p => p.mockStatus === '완료').length;
+    let planned = source.filter(p => p.mockStatus === '예정').length;
 
     // Animate numbers
     animateValue(elTotal, 0, total, 500);
@@ -271,83 +443,154 @@ function updateCharts() {
     if (typeof Chart === 'undefined') return;
 
     const ctxCat = document.getElementById('chart-category');
+    const ctxLocTop = document.getElementById('chart-location-top');
+    const ctxYear = document.getElementById('chart-year');
+    const ctxStatus = document.getElementById('chart-status');
     const ctxLoc = document.getElementById('chart-location');
-
-    if (!ctxCat || !ctxLoc) return;
 
     // Aggregate data
     const catData = {};
     const locData = {};
+    const yearData = {};
+    const statusData = {};
 
     filteredProjects.forEach(p => {
         catData[p.mockCategory] = (catData[p.mockCategory] || 0) + 1;
         locData[p.mockLocation] = (locData[p.mockLocation] || 0) + 1;
+        const y = (p.mockStartDate || '').slice(0, 4);
+        if (y) yearData[y] = (yearData[y] || 0) + 1;
+        if (p.mockStatus) statusData[p.mockStatus] = (statusData[p.mockStatus] || 0) + 1;
     });
 
-    const commonOptions = {
-        responsive: true,
-        maintainAspectRatio: false,
+    const axisTicks = { color: '#94a3b8', font: { family: "'Inter', sans-serif", size: 10 } };
+    const donutLegend = {
+        responsive: true, maintainAspectRatio: false,
         plugins: {
             legend: {
-                position: 'right',
-                labels: { color: '#94a3b8', font: {family: "'Inter', sans-serif", size: 11} }
-            }
-        }
-    };
-
-    // 1. Category Chart (Doughnut)
-    if (chartCategoryInstance) chartCategoryInstance.destroy();
-    chartCategoryInstance = new Chart(ctxCat.getContext('2d'), {
-        type: 'doughnut',
-        data: {
-            labels: Object.keys(catData),
-            datasets: [{
-                data: Object.values(catData),
-                backgroundColor: ['#6366f1', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6'],
-                borderWidth: 0,
-                cutout: '65%'
-            }]
-        },
-        options: commonOptions
-    });
-
-    // 2. Location Chart (Horizontal Bar)
-    if (chartLocationInstance) chartLocationInstance.destroy();
-
-    // Sort locations by count
-    const sortedLocs = Object.keys(locData).sort((a,b) => locData[b] - locData[a]);
-    const locValues = sortedLocs.map(k => locData[k]);
-
-    chartLocationInstance = new Chart(ctxLoc.getContext('2d'), {
-        type: 'bar',
-        data: {
-            labels: sortedLocs,
-            datasets: [{
-                label: '프로젝트 수',
-                data: locValues,
-                backgroundColor: 'rgba(99, 102, 241, 0.7)',
-                borderColor: '#6366f1',
-                borderWidth: 1,
-                borderRadius: 4
-            }]
-        },
-        options: {
-            indexAxis: 'y',
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
+                position: 'bottom',
+                align: 'center',
+                labels: {
+                    color: '#94a3b8',
+                    font: { size: 10 },
+                    boxWidth: 10,
+                    generateLabels: (chart) => {
+                        const data = chart.data;
+                        if (!data.labels?.length) return [];
+                        const ds = data.datasets[0];
+                        return data.labels.map((label, i) => ({
+                            text: `${label} (${ds.data[i]})`,
+                            fillStyle: Array.isArray(ds.backgroundColor) ? ds.backgroundColor[i] : ds.backgroundColor,
+                            strokeStyle: 'transparent',
+                            lineWidth: 0,
+                            fontColor: '#e5e7eb',
+                            hidden: false,
+                            index: i,
+                        }));
+                    }
+                }
             },
-            scales: {
-                x: {
-                    grid: { color: 'rgba(255,255,255,0.05)' },
-                    ticks: { color: '#94a3b8', stepSize: 1 }
-                },
-                y: {
-                    grid: { display: false },
-                    ticks: { color: '#94a3b8', font: {family: "'Inter', sans-serif"} }
+            tooltip: {
+                callbacks: {
+                    label: (ctx) => ` ${ctx.label}: ${ctx.parsed}개`
                 }
             }
         }
-    });
+    };
+    const integerTicks = { ...axisTicks, stepSize: 1, precision: 0, callback: (v) => Number.isInteger(v) ? v : null };
+    const barOpts = {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: axisTicks, beginAtZero: true },
+            y: { grid: { display: false }, ticks: axisTicks, beginAtZero: true }
+        }
+    };
+    // Vertical bar (count on Y-axis) → integer Y ticks
+    const vBarOpts = {
+        ...barOpts,
+        scales: {
+            x: { grid: { display: false }, ticks: axisTicks },
+            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: integerTicks, beginAtZero: true }
+        }
+    };
+    // Horizontal bar (count on X-axis) → integer X ticks
+    const hBarOpts = {
+        ...barOpts,
+        indexAxis: 'y',
+        scales: {
+            x: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: integerTicks, beginAtZero: true },
+            y: { grid: { display: false }, ticks: axisTicks }
+        }
+    };
+
+    // 1. Category (Doughnut) - top row
+    if (ctxCat) {
+        if (chartCategoryInstance) chartCategoryInstance.destroy();
+        // Fixed display order
+        const CAT_ORDER = ['상하수도', '도로', '단지', '터널', '교량', '철도', 'Other'];
+        const CAT_COLORS = {
+            '도로': '#10b981',
+            '상하수도': '#0ea5e9',
+            '터널': '#22d3ee',
+            '단지': '#a855f7',
+            '교량': '#06b6d4',
+            '철도': '#f59e0b',
+            'Other': '#6366f1',
+        };
+        const sortedCats = Object.keys(catData).sort((a, b) => {
+            const ia = CAT_ORDER.indexOf(a);
+            const ib = CAT_ORDER.indexOf(b);
+            return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+        });
+        chartCategoryInstance = new Chart(ctxCat.getContext('2d'), {
+            type: 'doughnut',
+            data: {
+                labels: sortedCats,
+                datasets: [{
+                    data: sortedCats.map(k => catData[k]),
+                    backgroundColor: sortedCats.map(k => CAT_COLORS[k] || '#6366f1'),
+                    borderWidth: 0,
+                    cutout: '60%'
+                }]
+            },
+            options: donutLegend
+        });
+    }
+
+    // 2. Location (small horizontal bar) - top row
+    if (ctxLocTop) {
+        if (chartLocationTopInstance) chartLocationTopInstance.destroy();
+        // Fixed display order: 서울 > 경기 > 인천 > 충청 > 강원 > 경상 > 전라 > 부산 > 제주 > 해외
+        const LOC_ORDER = ['서울', '경기', '인천', '전라', '경상', '부산', '충청', '강원', '제주', '해외'];
+        const sortedLocs = Object.keys(locData).sort((a, b) => {
+            const ia = LOC_ORDER.indexOf(a);
+            const ib = LOC_ORDER.indexOf(b);
+            return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+        });
+        chartLocationTopInstance = new Chart(ctxLocTop.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: sortedLocs,
+                datasets: [{ data: sortedLocs.map(k => locData[k]), backgroundColor: 'rgba(14, 165, 233, 0.7)', borderColor: '#0ea5e9', borderWidth: 1, borderRadius: 4 }]
+            },
+            options: hBarOpts
+        });
+    }
+
+    // 3. Year Distribution (vertical bar) - top row
+    if (ctxYear) {
+        if (chartYearInstance) chartYearInstance.destroy();
+        const sortedYears = Object.keys(yearData).sort();
+        chartYearInstance = new Chart(ctxYear.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: sortedYears,
+                datasets: [{ data: sortedYears.map(k => yearData[k]), backgroundColor: 'rgba(16, 185, 129, 0.7)', borderColor: '#10b981', borderWidth: 1, borderRadius: 4 }]
+            },
+            options: vBarOpts
+        });
+    }
+
+    // 4. Status Distribution is now shown as a 2x2 KPI grid (no chart needed)
+
 }

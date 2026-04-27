@@ -46,8 +46,10 @@ router.get('/api/hubs/:hub_id/projects', asyncHandler(async (req, res) => {
     const { hub_id } = req.params;
     const token = req.internalOAuthToken.access_token;
 
-    // 기본 프로젝트 목록 (60초 캐시)
-    const projects = await cache.wrap(`projects:${hub_id}`, 60, () => getProjects(hub_id, token));
+    // 기본 프로젝트 목록 (60초 캐시). ?refresh=1 이면 캐시 무효화 후 재조회.
+    const cacheKey = `projects:${hub_id}`;
+    if (req.query.refresh === '1') cache.del(cacheKey);
+    const projects = await cache.wrap(cacheKey, 60, () => getProjects(hub_id, token));
 
     const mapped = projects.map((p) => {
         const ext = p.attributes.extension?.data || {};
@@ -62,6 +64,15 @@ router.get('/api/hubs/:hub_id/projects', asyncHandler(async (req, res) => {
             country: ext.country || '',
             latitude: ext.latitude || null,
             longitude: ext.longitude || null,
+            // ACC HQ fields (enriched below)
+            projectType: '',
+            projectStatus: '',
+            startDate: '',
+            endDate: '',
+            constructionType: '',
+            classification: '',
+            jobNumber: '',
+            createdAt: p.attributes.createTime || '',
         };
     });
 
@@ -75,23 +86,47 @@ router.get('/api/hubs/:hub_id/projects', asyncHandler(async (req, res) => {
 
     const accountId = hub_id.replace(/^b\./, '');
     const enhanced = await Promise.all(mapped.map(async (p) => {
-        if (p.addressLine1 || p.city || !twoLeggedToken) return p;
+        if (!twoLeggedToken) return p;
         try {
             const projectId = p.id.replace(/^b\./, '');
-            const resp = await fetch(
+            const authHeaders = { Authorization: `Bearer ${twoLeggedToken}` };
+
+            // (1) HQ v1 — 주소/일정/job_number 등 레거시 필드
+            const hqResp = await fetch(
                 `https://developer.api.autodesk.com/hq/v1/accounts/${accountId}/projects/${projectId}`,
-                { headers: { Authorization: `Bearer ${twoLeggedToken}` } }
+                { headers: authHeaders }
             );
-            if (!resp.ok) return p;
-            const hq = await resp.json();
-            if (hq.address_line_1 || hq.city) {
-                p.addressLine1 = hq.address_line_1 || p.addressLine1;
-                p.addressLine2 = hq.address_line_2 || p.addressLine2;
-                p.city = hq.city || p.city;
-                p.stateOrProvince = hq.state_or_province || p.stateOrProvince;
-                p.postalCode = hq.postal_code || p.postalCode;
-                p.country = hq.country || p.country;
+            const hq = hqResp.ok ? await hqResp.json() : {};
+
+            // (2) Construction Admin v1 — ACC UI에 표시되는 "유형(type)" 필드
+            //     HQ v1은 최신 ACC 유형 값을 반환하지 않으므로 신규 엔드포인트를 사용.
+            let acc = {};
+            try {
+                const accResp = await fetch(
+                    `https://developer.api.autodesk.com/construction/admin/v1/projects/${projectId}`,
+                    { headers: authHeaders }
+                );
+                if (accResp.ok) acc = await accResp.json();
+            } catch (e) {
+                console.warn(`[hubs] Admin v1 API failed for "${p.name}":`, e.message);
             }
+
+            // Address fields (HQ 우선)
+            p.addressLine1 = hq.address_line_1 || p.addressLine1;
+            p.addressLine2 = hq.address_line_2 || p.addressLine2;
+            p.city = hq.city || p.city;
+            p.stateOrProvince = hq.state_or_province || p.stateOrProvince;
+            p.postalCode = hq.postal_code || p.postalCode;
+            p.country = hq.country || p.country;
+
+            // Project metadata — ACC Admin v1의 `type`을 최우선, HQ 값은 fallback
+            p.projectType = acc.type || hq.type || hq.construction_type || '';
+            p.projectStatus = acc.status || hq.status || '';
+            p.startDate = acc.startDate || hq.start_date || '';
+            p.endDate = acc.endDate || hq.end_date || '';
+            p.constructionType = hq.construction_type || '';
+            p.classification = acc.classification || hq.classification || '';
+            p.jobNumber = acc.jobNumber || hq.job_number || '';
         } catch (e) {
             console.warn(`[hubs] HQ API failed for "${p.name}":`, e.message);
         }

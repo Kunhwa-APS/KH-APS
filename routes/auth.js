@@ -42,7 +42,18 @@ router.get('/api/auth/login', (req, res) => {
 // ── GET /api/auth/callback ─────────────────────────────────────
 router.get('/api/auth/callback',
     (req, res, next) => authCallbackMiddleware(req, res, next, buildDynamicCallbackUrl(req)),
-    (req, res) => res.redirect('/')
+    (req, res) => {
+        // Prevent browser from caching the one-time-use callback URL and
+        // use HTML + location.replace to avoid leaving the callback in history.
+        res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        res.set('Pragma', 'no-cache');
+        res.type('html').send(`<!doctype html><meta charset="utf-8"><title>Signing in…</title>
+<script>
+  // Replace the callback URL, then replace the Autodesk authorize URL in history
+  // by navigating to the app home via location.replace (no new history entry).
+  window.location.replace('/');
+<\/script>`);
+    }
 );
 
 // ── GET /api/auth/logout ───────────────────────────────────────

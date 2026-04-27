@@ -1,6 +1,8 @@
 /* ============================================================
    main.js — Application Entry Point (ES6 Module)
    ============================================================ */
+
+
 import { initViewer, loadModel, loadModelWithTracking, getSafeUrn } from './viewer.js';
 import { initTree } from './sidebar.js';
 import { runDiff, visualizeDiff, loadVersions, exitCompareMode, showDiffList, addToolbarButton, addExitCompareButton } from './diff-viewer.js';

@@ -220,119 +220,144 @@
                     </div>
                 </div>
 
-                <!-- Stats Row -->
-                <div class="db-stats-row">
-                    <div class="db-stat-card">
-                        <div class="stat-icon" style="background: rgba(99, 102, 241, 0.15); color: #6366f1;">
-                            <i class="fas fa-layer-group"></i>
+                <!-- Row 1: Filters (full-width horizontal bar) -->
+                <div class="db-filter-row">
+                    <div class="db-filter-box db-filter-horizontal">
+                        <div class="filter-header">
+                            <i class="fas fa-filter"></i> Filters
                         </div>
-                        <div class="stat-info">
-                            <h3>Total Projects</h3>
-                            <div class="stat-val" id="stat-total">0</div>
+                        <div class="filter-inputs">
+                        <div class="filter-group">
+                            <label>카테고리</label>
+                            <select id="filter-category">
+                                <option value="all">전체</option>
+                                <option value="도로">도로</option>
+                                <option value="상하수도">상하수도</option>
+                                <option value="터널">터널</option>
+                                <option value="단지">단지</option>
+                                <option value="교량">교량</option>
+                                <option value="철도">철도</option>
+                                <option value="Other">Other</option>
+                            </select>
                         </div>
-                    </div>
-                    <div class="db-stat-card">
-                        <div class="stat-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
-                            <i class="fas fa-play"></i>
+                        <div class="filter-group">
+                            <label>위치 (지역)</label>
+                            <select id="filter-location">
+                                <option value="all">전체 지역</option>
+                                <option value="서울">서울</option>
+                                <option value="경기">경기</option>
+                                <option value="인천">인천</option>
+                                <option value="부산">부산</option>
+                                <option value="충청">충청</option>
+                                <option value="강원">강원</option>
+                                <option value="해외">해외</option>
+                            </select>
                         </div>
-                        <div class="stat-info">
-                            <h3>In Progress</h3>
-                            <div class="stat-val" id="stat-active">0</div>
+                        <div class="filter-group">
+                            <label>연도별</label>
+                            <select id="filter-year">
+                                <option value="all">전체 연도</option>
+                            </select>
                         </div>
-                    </div>
-                    <div class="db-stat-card">
-                        <div class="stat-icon" style="background: rgba(14, 165, 233, 0.15); color: #0ea5e9;">
-                            <i class="fas fa-check-circle"></i>
+                        <div class="filter-group">
+                            <label>진행 상태</label>
+                            <select id="filter-status">
+                                <option value="all">전체 상태</option>
+                                <option value="진행중">진행 중</option>
+                                <option value="완료">완료</option>
+                                <option value="예정">예정</option>
+                            </select>
                         </div>
-                        <div class="stat-info">
-                            <h3>Completed</h3>
-                            <div class="stat-val" id="stat-completed">0</div>
-                        </div>
-                    </div>
-                    <div class="db-stat-card">
-                        <div class="stat-icon" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">
-                            <i class="fas fa-calendar-alt"></i>
-                        </div>
-                        <div class="stat-info">
-                            <h3>Planned</h3>
-                            <div class="stat-val" id="stat-planned">0</div>
                         </div>
                     </div>
                 </div>
 
-                <div class="db-grid">
-                    <!-- Sidebar (Filters) -->
-                    <div class="db-sidebar">
-                        <div class="db-filter-box">
-                            <div class="filter-header">
-                                <i class="fas fa-filter"></i> Filters
-                            </div>
-                            <div class="filter-group">
-                                <label>카테고리</label>
-                                <select id="filter-category">
-                                    <option value="all">전체</option>
-                                    <option value="건축">건축</option>
-                                    <option value="토목">토목</option>
-                                    <option value="플랜트">플랜트</option>
-                                    <option value="인프라">인프라</option>
-                                </select>
-                            </div>
-                            <div class="filter-group">
-                                <label>위치 (지역)</label>
-                                <select id="filter-location">
-                                    <option value="all">전체 지역</option>
-                                    <option value="서울">서울</option>
-                                    <option value="경기">경기</option>
-                                    <option value="인천">인천</option>
-                                    <option value="부산">부산</option>
-                                    <option value="충청">충청</option>
-                                    <option value="강원">강원</option>
-                                    <option value="해외">해외</option>
-                                </select>
-                            </div>
-                            <div class="filter-group">
-                                <label>진행 상태</label>
-                                <select id="filter-status">
-                                    <option value="all">전체 상태</option>
-                                    <option value="진행중">진행 중</option>
-                                    <option value="완료">완료</option>
-                                    <option value="예정">예정</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="db-chart-box">
-                            <h3 class="chart-title">Category Distribution</h3>
-                            <div class="chart-container-sm">
-                                <canvas id="chart-category"></canvas>
-                            </div>
-                        </div>
-                        <div class="db-chart-box">
-                            <h3 class="chart-title">Location Distribution</h3>
-                            <div class="chart-container-sm">
-                                <canvas id="chart-location"></canvas>
-                            </div>
+                <!-- Row 3: Distribution Charts (4-column horizontal) -->
+                <div class="db-top-row">
+                    <div class="db-chart-box">
+                        <h3 class="chart-title">Category Distribution</h3>
+                        <div class="chart-container-sm">
+                            <canvas id="chart-category"></canvas>
                         </div>
                     </div>
-
-                    <!-- Main Grid Content -->
-                    <div class="db-content">
-                        <!-- Controls -->
-                        <div class="db-controls">
-                            <span class="db-count">검색된 프로젝트: <strong id="db-project-count">0</strong>개</span>
-                            <div class="db-sort">
-                                <select id="sort-projects">
-                                    <option value="newest">최신순</option>
-                                    <option value="name">이름순</option>
-                                    <option value="oldest">오래된순</option>
-                                </select>
-                            </div>
+                    <div class="db-chart-box">
+                        <h3 class="chart-title">Location Distribution</h3>
+                        <div class="chart-container-sm">
+                            <canvas id="chart-location-top"></canvas>
                         </div>
-                        <!-- Project Cards Container -->
-                        <div class="db-project-grid" id="db-project-grid">
-                            <!-- Cards inserted here by JS -->
+                    </div>
+                    <div class="db-chart-box">
+                        <h3 class="chart-title">Year Distribution</h3>
+                        <div class="chart-container-sm">
+                            <canvas id="chart-year"></canvas>
+                        </div>
+                    </div>
+                    <div class="db-chart-box db-status-box">
+                        <div class="db-status-grid">
+                            <div class="db-status-card">
+                                <div class="stat-icon" style="background: rgba(99, 102, 241, 0.15); color: #6366f1;">
+                                    <i class="fas fa-layer-group"></i>
+                                </div>
+                                <div class="stat-info">
+                                    <h3>Total Projects</h3>
+                                    <div class="stat-sub">전체 프로젝트</div>
+                                    <div class="stat-val" id="stat-total">0</div>
+                                </div>
+                            </div>
+                            <div class="db-status-card">
+                                <div class="stat-icon" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+                                    <i class="fas fa-play"></i>
+                                </div>
+                                <div class="stat-info">
+                                    <h3>In Progress</h3>
+                                    <div class="stat-sub">진행중</div>
+                                    <div class="stat-val" id="stat-active">0</div>
+                                </div>
+                            </div>
+                            <div class="db-status-card">
+                                <div class="stat-icon" style="background: rgba(14, 165, 233, 0.15); color: #0ea5e9;">
+                                    <i class="fas fa-check-circle"></i>
+                                </div>
+                                <div class="stat-info">
+                                    <h3>Completed</h3>
+                                    <div class="stat-sub">완료</div>
+                                    <div class="stat-val" id="stat-completed">0</div>
+                                </div>
+                            </div>
+                            <div class="db-status-card">
+                                <div class="stat-icon" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">
+                                    <i class="fas fa-calendar-alt"></i>
+                                </div>
+                                <div class="stat-info">
+                                    <h3>Planned</h3>
+                                    <div class="stat-sub">예정</div>
+                                    <div class="stat-val" id="stat-planned">0</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
+
+                <!-- Main Content: Full-width Project Grid -->
+                <div class="db-content">
+                    <div class="db-controls">
+                        <span class="db-count">검색된 프로젝트: <strong id="db-project-count">0</strong>개</span>
+                        <div class="db-sort">
+                            <button id="db-refresh-btn" class="db-refresh-btn" title="ACC에서 프로젝트를 다시 불러옵니다">
+                                <i class="fas fa-sync-alt"></i> 새로고침
+                            </button>
+                            <select id="sort-projects">
+                                <option value="newest">최신순</option>
+                                <option value="name">이름순</option>
+                                <option value="oldest">오래된순</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="db-project-grid" id="db-project-grid">
+                        <!-- Cards inserted here by JS -->
+                    </div>
+                </div>
+
             </div>
 
             <!-- Project Selection Dashboard (Legacy) -->
